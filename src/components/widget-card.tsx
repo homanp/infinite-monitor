@@ -2,6 +2,20 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import {
+  GripVertical,
+  X,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { useWidgetStore, type Widget } from "@/store/widget-store";
+import { WidgetPreview } from "@/components/widget-preview";
+
+// ─── TV static noise (shown while building) ───────────────────────────────────
 
 function StaticNoise() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -43,7 +57,6 @@ function StaticNoise() {
         className="w-full h-full opacity-60"
         style={{ imageRendering: "pixelated" }}
       />
-      {/* scanlines */}
       <div
         className="absolute inset-0"
         style={{
@@ -54,65 +67,8 @@ function StaticNoise() {
     </div>
   );
 }
-import {
-  GripVertical,
-  X,
-  Maximize2,
-  Minimize2,
-  Loader2,
-  RefreshCw,
-  AlertTriangle,
-} from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { useWidgetStore, type Widget } from "@/store/widget-store";
 
-type SandboxStatus = "loading" | "alive" | "dead";
-
-function useSandboxHealth(
-  sandboxId: string | null,
-  previewUrl: string | null,
-  isBuilding: boolean
-) {
-  const [status, setStatus] = useState<SandboxStatus>(
-    previewUrl ? "loading" : "dead"
-  );
-
-  useEffect(() => {
-    if (isBuilding && previewUrl) {
-      setStatus("alive");
-      return;
-    }
-
-    if (!sandboxId || !previewUrl) {
-      setStatus("dead");
-      return;
-    }
-
-    let cancelled = false;
-    setStatus("loading");
-
-    fetch("/api/sandbox", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sandboxId, previewUrl }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) setStatus(data.alive ? "alive" : "dead");
-      })
-      .catch(() => {
-        if (!cancelled) setStatus("dead");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sandboxId, previewUrl, isBuilding]);
-
-  return status;
-}
+// ─── Widget card ──────────────────────────────────────────────────────────────
 
 interface WidgetCardProps {
   widget: Widget;
@@ -123,13 +79,11 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
   const [expanded, setExpanded] = useState(false);
   const activeWidgetId = useWidgetStore((s) => s.activeWidgetId);
   const setActiveWidget = useWidgetStore((s) => s.setActiveWidget);
-  const clearSandboxInfo = useWidgetStore((s) => s.clearSandboxInfo);
+  const clearWidgetFiles = useWidgetStore((s) => s.clearWidgetFiles);
   const isBuilding = useWidgetStore((s) =>
     s.streamingWidgetIds.includes(widget.id)
   );
   const isActive = activeWidgetId === widget.id;
-
-  const sandboxStatus = useSandboxHealth(widget.sandboxId, widget.previewUrl, isBuilding);
 
   const collapse = useCallback(() => setExpanded(false), []);
 
@@ -145,10 +99,10 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
   const handleRebuild = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      clearSandboxInfo(widget.id);
+      clearWidgetFiles(widget.id);
       setActiveWidget(widget.id);
     },
-    [widget.id, clearSandboxInfo, setActiveWidget]
+    [widget.id, clearWidgetFiles, setActiveWidget]
   );
 
   const header = (isExpanded: boolean) => (
@@ -163,14 +117,14 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
           {widget.title}
         </span>
         {isBuilding && (
-          <Loader2 className="size-3 animate-spin text-teal-400 shrink-0" />
+          <RefreshCw className="size-3 animate-spin text-zinc-400 shrink-0" />
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+          className="h-6 w-6 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700"
           onClick={(e) => {
             e.stopPropagation();
             setExpanded(!isExpanded);
@@ -185,7 +139,7 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-zinc-500 hover:text-red-400 hover:bg-zinc-800"
+          className="h-6 w-6 text-zinc-500 hover:text-red-400 hover:bg-zinc-700"
           onClick={(e) => {
             e.stopPropagation();
             onRemove(widget.id);
@@ -197,81 +151,47 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
     </div>
   );
 
-  const expiredOverlay = (
-    <CardContent className="flex-1 flex flex-col items-center justify-center gap-3 p-0!">
-      <AlertTriangle className="size-5 text-zinc-500" />
-      <p className="text-xs text-zinc-500 text-center">
-        Sandbox expired or unreachable.
-      </p>
-      <Button
-        size="sm"
-        variant="outline"
-        className="gap-1.5 text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-        onClick={handleRebuild}
-      >
-        <RefreshCw className="size-3" />
-        Rebuild
-      </Button>
-    </CardContent>
-  );
-
-  const loadingOverlay = (
-    <CardContent className="flex-1 flex items-center justify-center p-0!">
-      <div className="flex items-center gap-2 text-xs text-zinc-500">
-        <Loader2 className="size-3.5 animate-spin" />
-        Checking sandbox…
-      </div>
-    </CardContent>
-  );
-
-  const iframeContent = (
-    <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden transform-[translateZ(0)]">
-      <iframe
-        key={widget.previewUrl}
-        src={widget.previewUrl!}
-        className="absolute inset-0 h-full w-full border-0"
-        allow="cross-origin-isolated"
-        referrerPolicy="no-referrer"
-        title={widget.title}
-      />
-      {isBuilding && <StaticNoise />}
-    </CardContent>
-  );
-
-  let widgetContent: React.ReactNode;
-
-  if (widget.previewUrl) {
-    if (sandboxStatus === "loading") {
-      widgetContent = loadingOverlay;
-    } else if (sandboxStatus === "dead") {
-      widgetContent = expiredOverlay;
-    } else {
-      widgetContent = iframeContent;
+  const widgetContent = () => {
+    if (widget.files && Object.keys(widget.files).length > 0) {
+      return (
+        <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden">
+          <WidgetPreview
+            widgetId={widget.id}
+            files={widget.files}
+            isBuilding={isBuilding}
+          />
+          {isBuilding && <StaticNoise />}
+        </CardContent>
+      );
     }
-  } else if (isBuilding) {
-    widgetContent = (
-      <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden">
-        <StaticNoise />
-      </CardContent>
-    );
-  } else if (widget.sandboxId) {
-    widgetContent = (
-      <CardContent className="flex-1 flex items-center justify-center p-0!">
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <Loader2 className="size-3.5 animate-spin" />
-          Provisioning sandbox…
-        </div>
-      </CardContent>
-    );
-  } else {
-    widgetContent = (
-      <CardContent className="flex-1 p-3 overflow-auto">
-        <p className="text-xs text-zinc-500">
+
+    if (isBuilding) {
+      return (
+        <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden">
+          <StaticNoise />
+        </CardContent>
+      );
+    }
+
+    return (
+      <CardContent className="flex-1 flex flex-col items-center justify-center gap-2 p-3">
+        <p className="text-xs text-zinc-500 text-center">
           {widget.description || "Open the chat to start building this widget."}
         </p>
+        {widget.previewUrl === null && widget.files === null ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 text-xs border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            onClick={handleRebuild}
+          >
+            <RefreshCw className="size-3" />
+            Rebuild
+          </Button>
+        )}
       </CardContent>
     );
-  }
+  };
 
   return (
     <>
@@ -283,7 +203,7 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
         onClick={() => setActiveWidget(widget.id)}
       >
         {header(false)}
-        {widgetContent}
+        {widgetContent()}
       </Card>
 
       {expanded &&
@@ -291,19 +211,14 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
           <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950/80 backdrop-blur-sm animate-in fade-in duration-150">
             <Card className="m-4 flex-1 flex flex-col rounded-none bg-zinc-800 border-zinc-700 ring-zinc-700 py-0 gap-0 overflow-hidden">
               {header(true)}
-              {widget.previewUrl && sandboxStatus === "alive" ? (
-                <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden transform-[translateZ(0)]">
-                  <iframe
-                    key={widget.previewUrl}
-                    src={widget.previewUrl}
-                    className="absolute inset-0 h-full w-full border-0"
-                    allow="cross-origin-isolated"
-                    referrerPolicy="no-referrer"
-                    title={widget.title}
+              {widget.files && Object.keys(widget.files).length > 0 ? (
+                <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden">
+                  <WidgetPreview
+                    widgetId={widget.id}
+                    files={widget.files}
+                    isBuilding={false}
                   />
                 </CardContent>
-              ) : widget.previewUrl && sandboxStatus === "dead" ? (
-                expiredOverlay
               ) : (
                 <CardContent className="flex-1 p-6 overflow-auto">
                   <p className="text-sm text-zinc-500">{widget.description}</p>

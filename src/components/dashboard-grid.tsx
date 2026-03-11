@@ -36,17 +36,9 @@ export function DashboardGrid() {
 
   const handleRemove = useCallback(
     (id: string) => {
-      const widget = widgets.find((w) => w.id === id);
-      if (widget?.sandboxId) {
-        fetch("/api/sandbox", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sandboxId: widget.sandboxId }),
-        }).catch(() => {});
-      }
       removeWidget(id);
     },
-    [widgets, removeWidget]
+    [removeWidget]
   );
 
   const layout: Layout = useMemo(

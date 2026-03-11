@@ -15,7 +15,9 @@ export interface Widget {
   description: string;
   messages: WidgetMessage[];
   layout: LayoutItem;
-  sandboxId: string | null;
+  // WebContainer: files written by the agent (persisted to localStorage)
+  files: Record<string, string> | null;
+  // Current session preview URL (WebContainer URL, not persisted)
   previewUrl: string | null;
 }
 
@@ -28,8 +30,9 @@ interface WidgetStore {
   addWidget: (title?: string, description?: string) => string;
   addMessage: (widgetId: string, message: WidgetMessage) => void;
   renameWidget: (id: string, title: string) => void;
-  setSandboxInfo: (widgetId: string, sandboxId: string, previewUrl: string) => void;
-  clearSandboxInfo: (widgetId: string) => void;
+  setWidgetFile: (widgetId: string, path: string, content: string) => void;
+  setPreviewUrl: (widgetId: string, url: string) => void;
+  clearWidgetFiles: (widgetId: string) => void;
   setStreaming: (widgetId: string, streaming: boolean) => void;
   setCurrentAction: (widgetId: string, action: string | null) => void;
   appendReasoningToMessage: (widgetId: string, messageId: string, text: string) => void;
@@ -90,7 +93,7 @@ export const useWidgetStore = create<WidgetStore>()(
           title,
           description,
           messages: [],
-          sandboxId: null,
+          files: null,
           previewUrl: null,
           layout: {
             i: id,
@@ -125,19 +128,29 @@ export const useWidgetStore = create<WidgetStore>()(
         });
       },
 
-      setSandboxInfo: (widgetId, sandboxId, previewUrl) => {
+      setWidgetFile: (widgetId, path, content) => {
         set({
           widgets: get().widgets.map((w) =>
-            w.id === widgetId ? { ...w, sandboxId, previewUrl } : w
+            w.id === widgetId
+              ? { ...w, files: { ...(w.files ?? {}), [path]: content } }
+              : w
           ),
         });
       },
 
-      clearSandboxInfo: (widgetId) => {
+      setPreviewUrl: (widgetId, url) => {
+        set({
+          widgets: get().widgets.map((w) =>
+            w.id === widgetId ? { ...w, previewUrl: url } : w
+          ),
+        });
+      },
+
+      clearWidgetFiles: (widgetId) => {
         set({
           widgets: get().widgets.map((w) =>
             w.id === widgetId
-              ? { ...w, sandboxId: null, previewUrl: null }
+              ? { ...w, files: null, previewUrl: null }
               : w
           ),
         });
@@ -232,8 +245,8 @@ export const useWidgetStore = create<WidgetStore>()(
           reasoningStreamingIds: [],
           widgets: (stored.widgets ?? []).map((w) => ({
             ...w,
-            sandboxId: w.sandboxId ?? null,
-            previewUrl: w.previewUrl ?? null,
+            files: w.files ?? null,
+            previewUrl: null, // never persist WC URLs across sessions
             messages: (w.messages ?? []).map((m) => ({
               ...m,
               reasoning: m.reasoning ?? undefined,
