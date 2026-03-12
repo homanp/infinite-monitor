@@ -6,6 +6,7 @@ import type { Layout } from "react-grid-layout";
 import { LayoutGrid } from "lucide-react";
 import { useWidgetStore } from "@/store/widget-store";
 import { WidgetCard } from "@/components/widget-card";
+import { deleteWidgetFromDb } from "@/lib/sync-db";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Empty,
@@ -37,6 +38,7 @@ export function DashboardGrid() {
   const handleRemove = useCallback(
     (id: string) => {
       removeWidget(id);
+      deleteWidgetFromDb(id);
     },
     [removeWidget]
   );

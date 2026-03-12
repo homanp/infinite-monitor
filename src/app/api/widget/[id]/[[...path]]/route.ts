@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { ensureWidget, readWidgetFile } from "@/lib/widget-runner";
+import { ensureWidget, writeWidgetFile } from "@/lib/widget-runner";
+import { getWidgetCode } from "@/db/widgets";
 
 const LOADING_HTML = `<!DOCTYPE html>
 <html class="dark">
@@ -19,10 +20,14 @@ export async function GET(
 ) {
   const { id, path: pathSegments } = await params;
 
-  const code = await readWidgetFile(id, "src/App.tsx");
+  // Read code from SQLite (source of truth)
+  const code = getWidgetCode(id);
   if (!code) {
     return new Response("Widget not found", { status: 404 });
   }
+
+  // Write to disk so the Docker container can pick it up
+  await writeWidgetFile(id, "src/App.tsx", code);
 
   // Ensure container is running
   const container = await ensureWidget(id);
