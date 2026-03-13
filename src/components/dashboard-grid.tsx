@@ -90,7 +90,7 @@ export function DashboardGrid() {
         </Empty>
       ) : (
         <ScrollArea className="h-full w-full">
-          <div className="px-5 pt-1">
+          <div className="px-5 pt-1 pb-40">
             {mounted && (
               <GridLayout
                 className="layout"

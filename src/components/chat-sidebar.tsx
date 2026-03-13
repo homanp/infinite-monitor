@@ -104,7 +104,7 @@ function ReasoningBlock({
           )
         }
       />
-      <ReasoningContent className="max-h-36 overflow-y-auto pr-2">
+      <ReasoningContent className="pr-2">
         {text}
       </ReasoningContent>
     </Reasoning>

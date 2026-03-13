@@ -220,16 +220,18 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown
-        className="min-w-0 max-w-none text-xs leading-5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:break-all"
-        BlockComponent={StreamdownBlock}
-        components={streamdownComponents}
-        controls={{ code: false, table: false }}
-        plugins={streamdownPlugins}
-        shikiTheme={shikiTheme}
-      >
-        {children}
-      </Streamdown>
+      <div className="max-h-48 overflow-y-auto pr-2">
+        <Streamdown
+          className="min-w-0 max-w-none text-xs leading-5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:break-all"
+          BlockComponent={StreamdownBlock}
+          components={streamdownComponents}
+          controls={{ code: false, table: false }}
+          plugins={streamdownPlugins}
+          shikiTheme={shikiTheme}
+        >
+          {children}
+        </Streamdown>
+      </div>
     </CollapsibleContent>
   )
 );
