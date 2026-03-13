@@ -1,7 +1,7 @@
 import { streamText, stepCountIs, tool } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import { createBashTool } from "bash-tool";
+import { Bash } from "just-bash";
 import {
   writeWidgetFile,
   readWidgetFile,
@@ -260,8 +260,22 @@ export async function POST(request: Request) {
     },
   });
 
-  const bashTool = createBashTool({
-    javascript: true,
+  const bashEnv = new Bash({ javascript: true });
+
+  const bashTool = tool({
+    description:
+      "Run a shell command in a sandboxed bash environment. The environment has an in-memory filesystem, supports standard Unix commands (grep, sed, awk, jq, sort, etc.), and JavaScript via js-exec. Use for data processing, prototyping, and quick calculations.",
+    inputSchema: z.object({
+      command: z.string().describe("The bash command to execute"),
+    }),
+    execute: async ({ command }) => {
+      const result = await bashEnv.exec(command);
+      return {
+        stdout: result.stdout.slice(0, 30000),
+        stderr: result.stderr.slice(0, 10000),
+        exitCode: result.exitCode,
+      };
+    },
   });
 
   const webSearchTool = anthropic.tools.webSearch_20250305({ maxUses: 5 });
