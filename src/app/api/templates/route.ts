@@ -1,59 +1,40 @@
-import { getAllDashboards, getWidget, getWidgetFiles } from "@/db/widgets";
-
-const TEMPLATE_DASHBOARDS = [
-  "Crypto Trader",
-  "World Conflicts OSINT",
-  "Prediction Markets",
-];
+import { getDashboard, getWidget, getWidgetFiles } from "@/db/widgets";
+import { TEMPLATES } from "@/lib/template-config";
 
 export async function GET() {
-  const allDashboards = getAllDashboards();
+  const templates = TEMPLATES.map((config) => {
+    const dashboard = getDashboard(config.dashboardId);
+    if (!dashboard) return null;
 
-  const templates = allDashboards
-    .filter((d) => TEMPLATE_DASHBOARDS.includes(d.title))
-    .map((d) => {
-      const widgetIds: string[] = d.widgetIdsJson
-        ? JSON.parse(d.widgetIdsJson)
-        : [];
+    const widgetIds: string[] = dashboard.widgetIdsJson
+      ? JSON.parse(dashboard.widgetIdsJson)
+      : [];
 
-      const widgets = widgetIds
-        .map((id) => {
-          const w = getWidget(id);
-          if (!w || !w.code) return null;
-          const files = getWidgetFiles(id);
-          return {
-            title: w.title,
-            description: w.description,
-            code: w.code,
-            files,
-            layoutJson: w.layoutJson,
-          };
-        })
-        .filter(Boolean);
+    const widgets = widgetIds
+      .map((id) => {
+        const w = getWidget(id);
+        if (!w || !w.code) return null;
+        const files = getWidgetFiles(id);
+        return {
+          title: w.title,
+          description: w.description,
+          code: w.code,
+          files,
+          layoutJson: w.layoutJson,
+        };
+      })
+      .filter(Boolean);
 
-      if (widgets.length === 0) return null;
+    if (widgets.length === 0) return null;
 
-      return {
-        name: d.title,
-        description: getTemplateDescription(d.title),
-        widgetCount: widgets.length,
-        widgets,
-      };
-    })
-    .filter(Boolean);
+    return {
+      name: config.name,
+      description: config.description,
+      icon: config.icon,
+      widgetCount: widgets.length,
+      widgets,
+    };
+  }).filter(Boolean);
 
   return Response.json(templates);
-}
-
-function getTemplateDescription(name: string): string {
-  switch (name) {
-    case "Crypto Trader":
-      return "Real-time crypto prices, charts, fear & greed index, top movers, and gas tracker.";
-    case "World Conflicts OSINT":
-      return "Conflict map, military news, YouTube OSINT feeds, displacement data, and airspace monitoring.";
-    case "Prediction Markets":
-      return "Live Polymarket and Kalshi markets, top traders, arbitrage scanner, and news feed.";
-    default:
-      return "";
-  }
 }

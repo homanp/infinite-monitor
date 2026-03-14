@@ -17,6 +17,7 @@ const MARGIN = 12;
 interface Template {
   name: string;
   description: string;
+  icon: string;
   widgetCount: number;
   widgets: Array<{
     title: string;
@@ -27,10 +28,10 @@ interface Template {
   }>;
 }
 
-const TEMPLATE_ICONS: Record<string, typeof TrendingUp> = {
-  "Crypto Trader": TrendingUp,
-  "World Conflicts OSINT": Globe,
-  "Prediction Markets": Shield,
+const ICON_MAP: Record<string, typeof TrendingUp> = {
+  trending: TrendingUp,
+  globe: Globe,
+  shield: Shield,
 };
 
 function TemplateGallery() {
@@ -79,7 +80,7 @@ function TemplateGallery() {
       <p className="text-[11px] text-zinc-600 uppercase tracking-wider mb-3">Or start from a template</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {templates.map((template) => {
-          const Icon = TEMPLATE_ICONS[template.name] || LayoutGrid;
+          const Icon = ICON_MAP[template.icon] || LayoutGrid;
           const isApplying = applying === template.name;
           return (
             <button
