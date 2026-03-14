@@ -137,10 +137,21 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       removeDashboard: (id) => {
-        set((state) => ({
-          dashboards: state.dashboards.filter((d) => d.id !== id),
-          activeDashboardId: state.activeDashboardId === id ? null : state.activeDashboardId,
-        }));
+        const dashboard = get().dashboards.find((d) => d.id === id);
+        const widgetIds = dashboard?.widgetIds ?? [];
+        set((state) => {
+          const nextActions = { ...state.currentActions };
+          for (const wid of widgetIds) delete nextActions[wid];
+          return {
+            dashboards: state.dashboards.filter((d) => d.id !== id),
+            widgets: state.widgets.filter((w) => !widgetIds.includes(w.id)),
+            activeDashboardId: state.activeDashboardId === id ? null : state.activeDashboardId,
+            activeWidgetId: widgetIds.includes(state.activeWidgetId ?? "") ? null : state.activeWidgetId,
+            streamingWidgetIds: state.streamingWidgetIds.filter((wid) => !widgetIds.includes(wid)),
+            reasoningStreamingIds: state.reasoningStreamingIds.filter((wid) => !widgetIds.includes(wid)),
+            currentActions: nextActions,
+          };
+        });
       },
 
       setActiveDashboard: (id) => {

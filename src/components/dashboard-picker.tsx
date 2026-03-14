@@ -86,9 +86,32 @@ export function DashboardPicker() {
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    const dashboard = dashboards.find((d) => d.id === id);
+    const widgetIds = dashboard?.widgetIds ?? [];
     removeDashboard(id);
-    scheduleSyncToServer();
-  }, [removeDashboard]);
+
+    // Delete widgets and dashboard from the server DB
+    for (const wid of widgetIds) {
+      fetch("/api/widgets", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: wid }),
+      }).catch(() => {});
+    }
+    fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dashboards: useWidgetStore.getState().dashboards.map((d) => ({
+          id: d.id, title: d.title, widgetIds: d.widgetIds, createdAt: d.createdAt,
+        })),
+        widgets: useWidgetStore.getState().widgets.map((w) => ({
+          id: w.id, title: w.title, description: w.description, code: w.code,
+          layout: w.layout, messages: w.messages,
+        })),
+      }),
+    }).catch(() => {});
+  }, [removeDashboard, dashboards]);
 
   if (dashboards.length === 0) return null;
 
