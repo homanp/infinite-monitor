@@ -18,6 +18,7 @@ interface Template {
   name: string;
   description: string;
   icon: string;
+  screenshot: string;
   widgetCount: number;
   preview: string[];
   widgets: Array<{
@@ -34,28 +35,6 @@ const ICON_MAP: Record<string, typeof TrendingUp> = {
   globe: Globe,
   shield: Shield,
 };
-
-function MiniGrid({ titles }: { titles: string[] }) {
-  return (
-    <div className="w-full bg-zinc-950 border border-zinc-800/50 p-2 grid grid-cols-3 gap-1 h-28 overflow-hidden">
-      {titles.slice(0, 9).map((title, i) => (
-        <div
-          key={i}
-          className="bg-zinc-800/60 px-1.5 py-1 overflow-hidden"
-        >
-          <div className="text-[7px] text-zinc-500 uppercase tracking-wider truncate leading-tight">
-            {title}
-          </div>
-          <div className="mt-1 space-y-0.5">
-            <div className="h-[3px] bg-zinc-700/50 w-full" />
-            <div className="h-[3px] bg-zinc-700/30 w-3/4" />
-            <div className="h-[3px] bg-zinc-700/20 w-1/2" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function TemplateGallery() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -112,7 +91,13 @@ function TemplateGallery() {
               disabled={isApplying}
               className="group relative flex flex-col bg-zinc-900/30 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900/60 transition-all text-left disabled:opacity-50 overflow-hidden"
             >
-              <MiniGrid titles={template.preview} />
+              <div className="w-full h-36 overflow-hidden bg-zinc-950">
+                <img
+                  src={template.screenshot}
+                  alt={template.name}
+                  className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-opacity"
+                />
+              </div>
               <div className="flex flex-col gap-2 p-4">
                 <div className="flex items-center gap-2">
                   <Icon className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />

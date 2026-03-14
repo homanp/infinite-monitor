@@ -31,6 +31,7 @@ export async function GET() {
       name: config.name,
       description: config.description,
       icon: config.icon,
+      screenshot: config.screenshot,
       widgetCount: widgets.length,
       preview: widgets.map((w) => (w as { title: string }).title),
       widgets,
