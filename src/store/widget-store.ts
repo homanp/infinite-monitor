@@ -372,6 +372,20 @@ export const useWidgetStore = create<WidgetStore>()(
             d.id === dashId ? { ...d, widgetIds: [...d.widgetIds, ...newWidgets.map((w) => w.id)] } : d
           ),
         }));
+
+        fetch("/api/widgets/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            widgets: newWidgets.map((w) => ({
+              id: w.id,
+              title: w.title,
+              description: w.description,
+              code: w.code,
+              files: w.files,
+            })),
+          }),
+        }).catch(console.error);
       },
     }),
     {
