@@ -3,7 +3,7 @@
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { GridLayout, useContainerWidth } from "react-grid-layout";
 import type { Layout } from "react-grid-layout";
-import { LayoutGrid, TrendingUp, Shield, Globe, Plus } from "lucide-react";
+import { LayoutGrid, TrendingUp, Shield, Globe } from "lucide-react";
 import { useWidgetStore } from "@/store/widget-store";
 import { WidgetCard } from "@/components/widget-card";
 import { deleteWidgetFromDb, scheduleSyncToServer } from "@/lib/sync-db";
@@ -59,73 +59,55 @@ function TemplateGallery() {
     setApplying(null);
   };
 
-  return (
-    <div className="flex flex-col items-center justify-center h-full px-8 py-12 gap-8">
-      <div className="text-center space-y-2">
-        <div className="flex items-center justify-center w-10 h-10 mx-auto bg-zinc-800 mb-3">
-          <LayoutGrid className="w-5 h-5 text-zinc-400" />
-        </div>
-        <h2 className="text-sm font-medium uppercase tracking-widest text-zinc-300">
-          Start with a Template
-        </h2>
-        <p className="text-xs text-zinc-500 max-w-sm">
-          Choose a pre-built dashboard to get started instantly, or create a blank one.
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl">
+  if (loading) {
+    return (
+      <div className="w-full max-w-3xl mx-auto px-8">
+        <p className="text-[11px] text-zinc-600 uppercase tracking-wider mb-3">Templates</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-40 bg-zinc-800/50 animate-pulse" />
+            <div key={i} className="h-36 bg-zinc-800/50 animate-pulse" />
           ))}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl">
-          {templates.map((template) => {
-            const Icon = TEMPLATE_ICONS[template.name] || LayoutGrid;
-            const isApplying = applying === template.name;
-            return (
-              <button
-                key={template.name}
-                onClick={() => handleApply(template)}
-                disabled={isApplying}
-                className="group relative flex flex-col items-start gap-3 p-5 bg-zinc-900/50 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900 transition-all text-left disabled:opacity-50"
-              >
-                <div className="flex items-center gap-2">
-                  <Icon className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
-                  <span className="text-xs font-medium uppercase tracking-wider text-zinc-300">
-                    {template.name}
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  {template.description}
-                </p>
-                <div className="text-[10px] text-zinc-600 mt-auto">
-                  {template.widgetCount} widgets
-                </div>
-                {isApplying && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/80">
-                    <span className="text-xs text-zinc-400 animate-pulse">Loading...</span>
-                  </div>
-                )}
-              </button>
-            );
-          })}
+      </div>
+    );
+  }
 
-          <button
-            onClick={() => {}}
-            className="group flex flex-col items-center justify-center gap-2 p-5 border border-dashed border-zinc-800 hover:border-zinc-600 transition-all"
-          >
-            <Plus className="w-5 h-5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
-            <span className="text-[11px] text-zinc-600 group-hover:text-zinc-400 transition-colors">
-              Blank Dashboard
-            </span>
-          </button>
-        </div>
-      )}
+  if (templates.length === 0) return null;
 
-      <div className="flex items-center gap-3 mt-2">
-        <CreateWidgetDialog />
+  return (
+    <div className="w-full max-w-3xl mx-auto px-8">
+      <p className="text-[11px] text-zinc-600 uppercase tracking-wider mb-3">Or start from a template</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {templates.map((template) => {
+          const Icon = TEMPLATE_ICONS[template.name] || LayoutGrid;
+          const isApplying = applying === template.name;
+          return (
+            <button
+              key={template.name}
+              onClick={() => handleApply(template)}
+              disabled={isApplying}
+              className="group relative flex flex-col items-start gap-3 p-5 bg-zinc-900/50 border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900 transition-all text-left disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2">
+                <Icon className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+                <span className="text-xs font-medium uppercase tracking-wider text-zinc-300">
+                  {template.name}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                {template.description}
+              </p>
+              <div className="text-[10px] text-zinc-600 mt-auto">
+                {template.widgetCount} widgets
+              </div>
+              {isApplying && (
+                <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/80">
+                  <span className="text-xs text-zinc-400 animate-pulse">Loading...</span>
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -180,7 +162,25 @@ export function DashboardGrid() {
   return (
     <div ref={containerRef} className="min-w-0 flex-1 w-full overflow-hidden">
       {widgets.length === 0 ? (
-        <TemplateGallery />
+        <ScrollArea className="h-full w-full">
+          <div className="flex flex-col items-center pt-16 pb-20 gap-10">
+            <div className="flex flex-col items-center gap-1.5 text-center">
+              <div className="flex items-center justify-center w-10 h-10 bg-zinc-800 text-zinc-400 mb-2">
+                <LayoutGrid className="w-5 h-5" />
+              </div>
+              <div className="text-sm font-medium text-zinc-300 uppercase tracking-widest">
+                No Widgets Yet
+              </div>
+              <p className="text-xs text-zinc-500 max-w-xs">
+                Get started by adding your first widget or pick a template below.
+              </p>
+              <div className="mt-3">
+                <CreateWidgetDialog />
+              </div>
+            </div>
+            <TemplateGallery />
+          </div>
+        </ScrollArea>
       ) : (
         <ScrollArea className="h-full w-full">
           <div className="px-5 pt-1 pb-40">
