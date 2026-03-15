@@ -22,7 +22,11 @@ export async function POST(request: Request) {
     });
 
     for (const [path, content] of Object.entries(w.files)) {
-      await writeWidgetFile(w.id, path, content);
+      try {
+        await writeWidgetFile(w.id, path, content);
+      } catch {
+        // skip files that fail validation (e.g. deps.json)
+      }
     }
 
     rebuildWidget(w.id).catch(console.error);
