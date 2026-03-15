@@ -81,7 +81,7 @@ function generateId(prefix = "widget") {
   return `${prefix}-${Date.now()}-${counter++}`;
 }
 
-function getNextPosition(widgets: Widget[], widgetIds: string[]): { x: number; y: number } {
+export function getNextPosition(widgets: Widget[], widgetIds: string[]): { x: number; y: number } {
   const dashboardWidgets = widgets.filter((w) => widgetIds.includes(w.id));
   if (dashboardWidgets.length === 0) return { x: 0, y: 0 };
 

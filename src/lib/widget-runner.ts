@@ -141,7 +141,7 @@ async function execInRuntime(cmd: string): Promise<{ exitCode: number; output: s
 
 const VALID_PACKAGE_RE = /^(@[\w.-]+\/)?[\w.-]+(@[\w.^~>=<| -]+)?$/;
 
-function sanitizePath(relativePath: string): string {
+export function sanitizePath(relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, "/");
   if (normalized.startsWith("/") || normalized.includes("..")) {
     throw new Error(`Invalid path: ${relativePath}`);
@@ -152,7 +152,7 @@ function sanitizePath(relativePath: string): string {
   return normalized;
 }
 
-function validatePackages(packages: string[]): void {
+export function validatePackages(packages: string[]): void {
   for (const pkg of packages) {
     if (!VALID_PACKAGE_RE.test(pkg)) {
       throw new Error(`Invalid package name: ${pkg}`);
