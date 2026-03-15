@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const { text } = await generateText({
       model: anthropic("claude-haiku-4-5"),
       prompt: `Generate a short widget title (2-4 words max, no punctuation) for this request: "${message}". Reply with only the title, nothing else.`,
-      maxTokens: 20,
+      maxOutputTokens: 20,
     });
 
     return Response.json({ title: text.trim() });

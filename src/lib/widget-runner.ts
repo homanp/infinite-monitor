@@ -125,7 +125,7 @@ async function execInRuntime(cmd: string): Promise<{ exitCode: number; output: s
       const chunks: Buffer[] = [];
       stream.on("data", (chunk: Buffer) => chunks.push(chunk));
       stream.on("end", () => {
-        exec.inspect().then((info: { ExitCode: number }) => {
+        exec.inspect().then((info) => {
           resolve({
             exitCode: info.ExitCode ?? 0,
             output: Buffer.concat(chunks).toString("utf-8"),

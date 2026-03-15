@@ -67,6 +67,7 @@ export const MessageResponse = memo(function MessageResponse({
       components={streamdownComponents}
       controls={{ code: false, table: false }}
       plugins={streamdownPlugins}
+      // @ts-expect-error streamdown ThemeInput type mismatch
       shikiTheme={shikiTheme}
       {...props}
     />

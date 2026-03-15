@@ -208,7 +208,7 @@ export type ReasoningContentProps = ComponentProps<
 };
 
 const streamdownPlugins = { cjk, code, math, mermaid };
-const shikiTheme: [string, string] = ["github-dark", "github-dark"];
+const shikiTheme = ["github-dark", "github-dark"] as const;
 
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
@@ -227,6 +227,7 @@ export const ReasoningContent = memo(
           components={streamdownComponents}
           controls={{ code: false, table: false }}
           plugins={streamdownPlugins}
+          // @ts-expect-error streamdown ThemeInput type mismatch
           shikiTheme={shikiTheme}
         >
           {children}

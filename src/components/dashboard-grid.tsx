@@ -117,10 +117,9 @@ function TemplateGallery() {
 }
 
 export function DashboardGrid() {
-  const [hydrated, setHydrated] = useState(false);
+  const [hydrated, setHydrated] = useState(() => useWidgetStore.persist.hasHydrated());
   useEffect(() => {
     const unsub = useWidgetStore.persist.onFinishHydration(() => setHydrated(true));
-    if (useWidgetStore.persist.hasHydrated()) setHydrated(true);
     return unsub;
   }, []);
 
