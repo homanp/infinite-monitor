@@ -15,18 +15,15 @@ Each widget is a full React app — with its own dependencies, API calls, charts
 3. The widget renders live in an iframe on your dashboard
 4. Iterate by chatting — the agent rewrites and rebuilds in seconds
 
-The agent has 9 tools at its disposal:
+The agent has 6 tools at its disposal:
 
 | Tool | What it does |
 |------|-------------|
-| `writeFile` | Write source files to the widget |
-| `readFile` | Read existing widget source |
-| `listFiles` | List all files in the widget |
-| `deleteFile` | Remove a source file |
-| `addDependencies` | Install npm packages at build time |
+| `bash` | Run shell commands in a sandboxed environment (via [bash-tool](https://github.com/vercel-labs/bash-tool)) |
+| `writeFile` | Write source files to the widget — writing `src/App.tsx` triggers a build |
+| `readFile` | Read existing widget source files |
 | `listDashboardWidgets` | See sibling widgets on the same dashboard |
-| `readWidgetCode` | Read another widget's source code |
-| `bash` | Run shell commands in a sandboxed environment |
+| `readWidgetCode` | Read another widget's source code to match patterns |
 | `web_search` | Search the web for APIs, docs, and data |
 
 ## Quick start
