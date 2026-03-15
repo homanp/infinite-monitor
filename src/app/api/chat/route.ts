@@ -214,7 +214,8 @@ export async function POST(request: Request) {
   const result = streamText({
     model: anthropic("claude-opus-4-6"),
     system: SYSTEM_PROMPT,
-    messages,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    messages: messages as any,
     tools: {
       ...bashTools,
       listDashboardWidgets: listDashboardWidgetsTool,

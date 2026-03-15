@@ -190,7 +190,7 @@ export function CodeBlockContent({
     async function highlight() {
       try {
         const result = await codeToTokens(plainCode, {
-          lang: language || "text",
+          lang: (language || "text") as import("shiki").BundledLanguage,
           theme: "github-dark",
         });
 

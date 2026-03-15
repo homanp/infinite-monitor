@@ -375,7 +375,7 @@ export function ChatSidebar() {
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const inputRef = useRef(input);
-  inputRef.current = input;
+  useEffect(() => { inputRef.current = input; }, [input]);
 
   const prevWidgetIdRef = useRef<string | null>(null);
 
@@ -384,9 +384,12 @@ export function ChatSidebar() {
     if (prevWidgetIdRef.current) {
       draftInputs.set(prevWidgetIdRef.current, inputRef.current);
     }
-    setInput(activeWidgetId ? (draftInputs.get(activeWidgetId) ?? "") : "");
-    setPendingFiles([]);
     prevWidgetIdRef.current = activeWidgetId;
+    const next = activeWidgetId ? (draftInputs.get(activeWidgetId) ?? "") : "";
+    queueMicrotask(() => {
+      setInput(next);
+      setPendingFiles([]);
+    });
   }, [activeWidgetId]);
 
   const handleFiles = useCallback(async (fileList: FileList) => {
