@@ -1,4 +1,16 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
   app:
     build: .
     container_name: infinite-monitor
@@ -22,3 +34,5 @@ services:
 
 volumes:
   app-data:
+  caddy-data:
+  caddy-config:
