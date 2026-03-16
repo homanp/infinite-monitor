@@ -114,7 +114,3 @@ export async function scanUrls(urls: string[]): Promise<BrinScanResult[]> {
 
   return results;
 }
-
-export function isSafe(result: BrinResult): boolean {
-  return result.score >= SCORE_THRESHOLD;
-}

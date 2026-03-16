@@ -243,8 +243,8 @@ export async function POST(request: Request) {
         const results = await webSearch(searchProvider, query, searchApiKey);
         const scans = await scanUrls(results.map((r) => r.url));
         return results
-          .map((r, i) => ({ ...r, brin: { score: scans[i].score, verdict: scans[i].verdict } }))
-          .filter((r) => r.brin.score >= 30);
+          .map((r, i) => ({ ...r, brin: scans[i] }))
+          .filter((r) => r.brin.safe);
       },
     });
   }
