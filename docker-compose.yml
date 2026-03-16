@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    container_name: infinite-monitor
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - app-data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/widgets.db
+    depends_on:
+      widget-base:
+        condition: service_completed_successfully
+
+  widget-base:
+    build: ./docker/widget-base
+    image: widget-base:latest
+    container_name: widget-base-builder
+    command: ["echo", "Base image ready"]
+
+volumes:
+  app-data:
