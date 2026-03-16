@@ -1,0 +1,4 @@
+infinitemonitor.com {
+	encode gzip zstd
+	reverse_proxy localhost:3000
+}
