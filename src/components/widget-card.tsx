@@ -107,10 +107,13 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
   const iframeSrc = `/api/widget/${widget.id}/`;
 
   const header = (isExpanded: boolean) => (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-700">
+    <div className={cn(
+      "flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-700",
+      !isExpanded && "drag-handle cursor-grab active:cursor-grabbing"
+    )}>
       <div className="flex items-center gap-2 min-w-0">
         {!isExpanded && (
-          <div className="drag-handle cursor-grab active:cursor-grabbing p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors">
+          <div className="p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors">
             <GripVertical className="h-4 w-4" />
           </div>
         )}
