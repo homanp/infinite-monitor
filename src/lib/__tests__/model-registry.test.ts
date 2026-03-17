@@ -85,6 +85,15 @@ describe("PROVIDERS", () => {
       expect(p.envKey).toBeTruthy();
     }
   });
+
+  it("includes GPT-5.4 mini and nano for OpenAI", () => {
+    const openAI = findProvider("openai");
+    expect(openAI).toBeDefined();
+
+    const modelIds = new Set(openAI!.models.map((m) => m.id));
+    expect(modelIds.has("gpt-5.4-mini")).toBe(true);
+    expect(modelIds.has("gpt-5.4-nano")).toBe(true);
+  });
 });
 
 describe("ALL_MODELS", () => {
