@@ -258,7 +258,7 @@ function RegistryCard({
   onInstall: (entry: McpRegistryEntry) => void;
 }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-800/40 transition-colors group">
+    <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-800/40 transition-colors">
       <ServerIcon text={entry.icon} />
       <div className="flex-1 min-w-0">
         <div className="text-xs text-zinc-200">{entry.name}</div>
@@ -274,7 +274,7 @@ function RegistryCard({
         <button
           type="button"
           onClick={() => onInstall(entry)}
-          className="shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-wider border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors opacity-0 group-hover:opacity-100"
+          className="shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-wider border border-zinc-700 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"
         >
           Add
         </button>
