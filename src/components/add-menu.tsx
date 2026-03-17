@@ -36,7 +36,7 @@ export function AddMenu() {
             setActiveWidget(id);
             scheduleSyncToServer();
           }}
-          className="gap-2 cursor-pointer"
+          className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >
           <LayoutGrid className="h-4 w-4" />
           Widget
@@ -46,7 +46,7 @@ export function AddMenu() {
             addTextBlock();
             scheduleSyncToServer();
           }}
-          className="gap-2 cursor-pointer"
+          className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >
           <Type className="h-4 w-4" />
           Text
