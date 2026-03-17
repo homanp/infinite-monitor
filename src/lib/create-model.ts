@@ -13,6 +13,7 @@ import { createFireworks } from "@ai-sdk/fireworks";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import { createAlibaba } from "@ai-sdk/alibaba";
 import { createDeepInfra } from "@ai-sdk/deepinfra";
+import { isPlanProvider } from "@/lib/model-registry";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ProviderFactory = (opts?: { apiKey?: string }) => (modelId: string) => any;
@@ -35,12 +36,29 @@ const providers: Record<string, ProviderFactory> = {
   deepinfra: (opts) => createDeepInfra(opts),
 };
 
-export function createModel(modelStr: string, apiKey?: string) {
+export interface CreateModelOptions {
+  apiKey?: string;
+  planEndpoint?: string;
+}
+
+export function createModel(modelStr: string, optsOrApiKey?: string | CreateModelOptions) {
+  const opts: CreateModelOptions =
+    typeof optsOrApiKey === "string" ? { apiKey: optsOrApiKey } : optsOrApiKey ?? {};
+
   const idx = modelStr.indexOf(":");
   const providerId = idx === -1 ? "anthropic" : modelStr.slice(0, idx);
   const modelId = idx === -1 ? modelStr : modelStr.slice(idx + 1);
+
+  if (isPlanProvider(providerId) && opts.planEndpoint) {
+    const proxy = createOpenAI({
+      baseURL: opts.planEndpoint,
+      apiKey: opts.apiKey || "plan-subscription",
+    });
+    return proxy(modelId);
+  }
+
   const factory = providers[providerId] ?? providers.anthropic;
-  const provider = factory(apiKey ? { apiKey } : undefined);
+  const provider = factory(opts.apiKey ? { apiKey: opts.apiKey } : undefined);
   return provider(modelId);
 }
 

@@ -43,7 +43,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useWidgetStore, type WidgetMessage, type MessageAttachment } from "@/store/widget-store";
 import { useSettingsStore } from "@/store/settings-store";
-import { PROVIDERS, parseModelString, findProvider } from "@/lib/model-registry";
+import {
+  PROVIDERS,
+  PLAN_PROVIDERS,
+  parseModelString,
+  findProvider,
+  findPlanProvider,
+  isPlanProvider,
+} from "@/lib/model-registry";
 import { SearchProviderPicker } from "@/components/search-provider-picker";
 
 interface PendingFile {
@@ -211,6 +218,7 @@ async function streamToWidget(
   messages: Array<{ role: "user" | "assistant"; content: string | Record<string, unknown>[] }>,
   model?: string,
   apiKey?: string,
+  planEndpoint?: string,
 ) {
   const {
     addMessage,
@@ -253,6 +261,7 @@ async function streamToWidget(
         widgetId,
         model,
         apiKey,
+        ...(planEndpoint ? { planEndpoint } : {}),
         ...(searchProvider && searchApiKey ? { searchProvider, searchApiKey } : {}),
       }),
       signal: controller.signal,
@@ -367,23 +376,47 @@ function useModelSelector() {
   const setModel = useSettingsStore((s) => s.setModel);
   const apiKeys = useSettingsStore((s) => s.apiKeys);
   const setApiKey = useSettingsStore((s) => s.setApiKey);
+  const planEndpoints = useSettingsStore((s) => s.planEndpoints);
+  const setPlanEndpoint = useSettingsStore((s) => s.setPlanEndpoint);
   const [open, setOpen] = useState(false);
   const [keyInput, setKeyInput] = useState("");
+  const [endpointInput, setEndpointInput] = useState("");
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [showEndpointInput, setShowEndpointInput] = useState(false);
 
   const { providerId, modelId } = parseModelString(selectedModel);
+  const isPlan = isPlanProvider(providerId);
   const provider = findProvider(providerId);
-  const model = provider?.models.find((m) => m.id === modelId);
-  const hasKey = !!apiKeys[providerId];
+  const planProvider = findPlanProvider(providerId);
+  const model =
+    provider?.models.find((m) => m.id === modelId) ??
+    planProvider?.models.find((m) => m.id === modelId);
+  const hasKey = isPlan ? !!planEndpoints[providerId] : !!apiKeys[providerId];
+  const logoProvider = isPlan ? (planProvider?.logoProvider ?? providerId) : providerId;
 
   const handleSelect = (newModel: string) => {
     setModel(newModel);
     setOpen(false);
     const { providerId: pid } = parseModelString(newModel);
-    if (!apiKeys[pid]) {
-      setShowKeyInput(true);
+    const newIsPlan = isPlanProvider(pid);
+    if (newIsPlan) {
+      if (!planEndpoints[pid]) {
+        const pp = findPlanProvider(pid);
+        setEndpointInput(pp?.defaultEndpoint ?? "http://localhost:8080/v1");
+        setShowEndpointInput(true);
+        setShowKeyInput(false);
+      } else {
+        setShowEndpointInput(false);
+        setShowKeyInput(false);
+      }
     } else {
-      setShowKeyInput(false);
+      if (!apiKeys[pid]) {
+        setShowKeyInput(true);
+        setShowEndpointInput(false);
+      } else {
+        setShowKeyInput(false);
+        setShowEndpointInput(false);
+      }
     }
   };
 
@@ -395,11 +428,20 @@ function useModelSelector() {
     }
   };
 
+  const handleSaveEndpoint = () => {
+    if (endpointInput.trim()) {
+      setPlanEndpoint(providerId, endpointInput.trim());
+      setEndpointInput("");
+      setShowEndpointInput(false);
+    }
+  };
+
   const trigger = (
     <ModelSelector open={open} onOpenChange={setOpen}>
       <ModelSelectorTrigger className="inline-flex h-7 items-center gap-1.5 px-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer">
-        <ModelSelectorLogo provider={providerId as "anthropic"} className="size-3.5" />
+        <ModelSelectorLogo provider={logoProvider as "anthropic"} className="size-3.5" />
         <span>{model?.name ?? modelId}</span>
+        {isPlan && <span className="text-[9px] text-emerald-500/70 uppercase tracking-wider">plan</span>}
         {!hasKey && <span className="size-1.5 rounded-full bg-yellow-500/70 shrink-0" />}
       </ModelSelectorTrigger>
       <ModelSelectorContent>
@@ -421,12 +463,32 @@ function useModelSelector() {
               ))}
             </ModelSelectorGroup>
           ))}
+          <ModelSelectorGroup heading="Subscription Plans">
+            {PLAN_PROVIDERS.flatMap((p) =>
+              p.models.map((m) => (
+                <ModelSelectorItem
+                  key={`${p.id}:${m.id}`}
+                  value={`${p.id}:${m.id} ${m.name} ${p.name} plan subscription`}
+                  onSelect={() => handleSelect(`${p.id}:${m.id}`)}
+                  className="flex items-center gap-2"
+                >
+                  <ModelSelectorLogo provider={p.logoProvider as "anthropic"} />
+                  <ModelSelectorName>
+                    {m.name}
+                    <span className="ml-1.5 text-[10px] text-emerald-500/70 uppercase tracking-wider">
+                      {p.name}
+                    </span>
+                  </ModelSelectorName>
+                </ModelSelectorItem>
+              ))
+            )}
+          </ModelSelectorGroup>
         </ModelSelectorList>
       </ModelSelectorContent>
     </ModelSelector>
   );
 
-  const keyInputEl = (showKeyInput || !hasKey) ? (
+  const keyInputEl = !isPlan && (showKeyInput || !hasKey) ? (
     <div className="flex items-center gap-1.5">
       <input
         type="password"
@@ -445,11 +507,44 @@ function useModelSelector() {
     </div>
   ) : null;
 
-  return { trigger, keyInputEl };
+  const endpointInputEl = isPlan && (showEndpointInput || !hasKey) ? (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={endpointInput}
+          onChange={(e) => setEndpointInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSaveEndpoint()}
+          placeholder={planProvider?.defaultEndpoint ?? "http://localhost:8080/v1"}
+          className="flex-1 bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+        />
+        <button
+          onClick={handleSaveEndpoint}
+          className="px-2.5 py-1.5 text-xs uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+        >
+          Save
+        </button>
+      </div>
+      <p className="text-[10px] text-zinc-500 leading-relaxed">
+        Requires a CLI proxy (e.g.{" "}
+        <a
+          href={planProvider?.setupUrl ?? "https://github.com/router-for-me/CLIProxyAPI"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-zinc-400 underline underline-offset-2 hover:text-zinc-300"
+        >
+          CLIProxyAPI
+        </a>
+        ) to route requests through your {planProvider?.name ?? "subscription"}.
+      </p>
+    </div>
+  ) : null;
+
+  return { trigger, keyInputEl, endpointInputEl };
 }
 
 export function ChatSidebar() {
-  const { trigger: modelTrigger, keyInputEl: modelKeyInput } = useModelSelector();
+  const { trigger: modelTrigger, keyInputEl: modelKeyInput, endpointInputEl: modelEndpointInput } = useModelSelector();
   const widgets = useWidgetStore((s) => s.widgets);
   const activeWidgetId = useWidgetStore((s) => s.activeWidgetId);
   const streamingWidgetIds = useWidgetStore((s) => s.streamingWidgetIds);
@@ -647,15 +742,22 @@ export function ChatSidebar() {
       attachments,
     });
 
-    const { selectedModel, apiKeys } = useSettingsStore.getState();
+    const { selectedModel, apiKeys, planEndpoints } = useSettingsStore.getState();
     const { providerId } = parseModelString(selectedModel);
-    const byokKey = apiKeys[providerId];
+    const providerIsPlan = isPlanProvider(providerId);
+    const byokKey = providerIsPlan ? undefined : apiKeys[providerId];
+    const endpoint = providerIsPlan ? planEndpoints[providerId] : undefined;
 
     if (isFirstUserMessage && userContent) {
       fetch("/api/generate-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userContent, model: selectedModel, apiKey: byokKey }),
+        body: JSON.stringify({
+          message: userContent,
+          model: selectedModel,
+          apiKey: byokKey,
+          ...(endpoint ? { planEndpoint: endpoint } : {}),
+        }),
       })
         .then((res) => res.ok ? res.json() : null)
         .then((data) => {
@@ -664,7 +766,7 @@ export function ChatSidebar() {
         .catch(() => {});
     }
 
-    streamToWidget(widgetId, messagesForApi, selectedModel, byokKey);
+    streamToWidget(widgetId, messagesForApi, selectedModel, byokKey, endpoint);
   }
 
   return (
@@ -739,6 +841,7 @@ export function ChatSidebar() {
 
         <div className="px-5 py-3 space-y-2">
           {modelKeyInput}
+          {modelEndpointInput}
           <PromptInput onSubmit={handleSubmit}>
             {pendingFiles.length > 0 && (
               <div className="flex flex-wrap gap-1.5">

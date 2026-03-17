@@ -12,6 +12,16 @@ export interface ProviderInfo {
   models: ModelInfo[];
 }
 
+export interface PlanProviderInfo {
+  id: string;
+  name: string;
+  description: string;
+  defaultEndpoint: string;
+  setupUrl: string;
+  logoProvider: string;
+  models: ModelInfo[];
+}
+
 function models(
   providerId: string,
   providerName: string,
@@ -185,12 +195,69 @@ export const PROVIDERS: ProviderInfo[] = [
   },
 ];
 
+export const PLAN_PROVIDERS: PlanProviderInfo[] = [
+  {
+    id: "claude-max",
+    name: "Claude Max",
+    description: "Use your Claude Pro/Max subscription via a CLI proxy (e.g. CLIProxyAPI)",
+    defaultEndpoint: "http://localhost:8080/v1",
+    setupUrl: "https://github.com/router-for-me/CLIProxyAPI",
+    logoProvider: "anthropic",
+    models: models("claude-max", "Claude Max", [
+      ["claude-opus-4-6", "Claude Opus 4.6"],
+      ["claude-sonnet-4-6", "Claude Sonnet 4.6"],
+      ["claude-sonnet-4-5", "Claude Sonnet 4.5"],
+      ["claude-haiku-4-5", "Claude Haiku 4.5"],
+    ]),
+  },
+  {
+    id: "gemini-plan",
+    name: "Gemini Plan",
+    description: "Use your Gemini Pro/Ultra subscription via a CLI proxy (e.g. CLIProxyAPI)",
+    defaultEndpoint: "http://localhost:8080/v1",
+    setupUrl: "https://github.com/router-for-me/CLIProxyAPI",
+    logoProvider: "google",
+    models: models("gemini-plan", "Gemini Plan", [
+      ["gemini-2.5-pro", "Gemini 2.5 Pro"],
+      ["gemini-2.5-flash", "Gemini 2.5 Flash"],
+      ["gemini-3.1-pro-preview", "Gemini 3.1 Pro"],
+      ["gemini-3-flash-preview", "Gemini 3 Flash"],
+    ]),
+  },
+  {
+    id: "codex-plan",
+    name: "Codex / ChatGPT",
+    description: "Use your ChatGPT Plus/Pro or Codex subscription via a CLI proxy (e.g. CLIProxyAPI)",
+    defaultEndpoint: "http://localhost:8080/v1",
+    setupUrl: "https://github.com/router-for-me/CLIProxyAPI",
+    logoProvider: "openai",
+    models: models("codex-plan", "Codex / ChatGPT", [
+      ["gpt-5.4", "GPT-5.4"],
+      ["gpt-5.4-pro", "GPT-5.4 Pro"],
+      ["gpt-5.3-codex", "GPT-5.3 Codex"],
+      ["gpt-5-codex", "GPT-5 Codex"],
+      ["gpt-5", "GPT-5"],
+      ["gpt-5-mini", "GPT-5 Mini"],
+    ]),
+  },
+];
+
 export const ALL_MODELS = PROVIDERS.flatMap((p) => p.models);
+
+export const ALL_PLAN_MODELS = PLAN_PROVIDERS.flatMap((p) => p.models);
 
 export const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
 
 export function findProvider(providerId: string): ProviderInfo | undefined {
   return PROVIDERS.find((p) => p.id === providerId);
+}
+
+export function findPlanProvider(providerId: string): PlanProviderInfo | undefined {
+  return PLAN_PROVIDERS.find((p) => p.id === providerId);
+}
+
+export function isPlanProvider(providerId: string): boolean {
+  return PLAN_PROVIDERS.some((p) => p.id === providerId);
 }
 
 export function parseModelString(modelStr: string): { providerId: string; modelId: string } {

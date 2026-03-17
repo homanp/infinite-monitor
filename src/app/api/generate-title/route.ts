@@ -2,10 +2,11 @@ import { generateText } from "ai";
 import { createModel } from "@/lib/create-model";
 
 export async function POST(request: Request) {
-  const { message, model, apiKey } = (await request.json()) as {
+  const { message, model, apiKey, planEndpoint } = (await request.json()) as {
     message: string;
     model?: string;
     apiKey?: string;
+    planEndpoint?: string;
   };
 
   if (!message?.trim()) {
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
 
   try {
     const { text } = await generateText({
-      model: createModel(model ?? "anthropic:claude-haiku-4-5", apiKey),
+      model: createModel(model ?? "anthropic:claude-haiku-4-5", { apiKey, planEndpoint }),
       prompt: `Generate a short widget title (2-4 words max, no punctuation) for this request: "${message}". Reply with only the title, nothing else.`,
     });
 

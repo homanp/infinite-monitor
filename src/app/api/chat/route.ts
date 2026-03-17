@@ -124,6 +124,7 @@ export async function POST(request: Request) {
     widgetId,
     model: modelStr,
     apiKey,
+    planEndpoint,
     searchProvider,
     searchApiKey,
   } = body as {
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
     widgetId: string;
     model?: string;
     apiKey?: string;
+    planEndpoint?: string;
     searchProvider?: SearchProvider;
     searchApiKey?: string;
   };
@@ -143,7 +145,7 @@ export async function POST(request: Request) {
   }
 
   const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
-  const useAnthropic = isAnthropicModel(selectedModel);
+  const useAnthropic = isAnthropicModel(selectedModel) && !planEndpoint;
 
   const SANDBOX_ROOT = "/widget";
 
@@ -250,7 +252,7 @@ export async function POST(request: Request) {
   }
 
   const result = streamText({
-    model: createModel(selectedModel, apiKey),
+    model: createModel(selectedModel, { apiKey, planEndpoint }),
     system: SYSTEM_PROMPT,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     messages: messages as any,
