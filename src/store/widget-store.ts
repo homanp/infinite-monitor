@@ -121,28 +121,25 @@ function migrateViewports(
   return migrated;
 }
 
-export function getNextPosition(
+export function shiftItemsDown(
   widgets: Widget[],
   widgetIds: string[],
-  textBlocks: TextBlock[] = [],
-  textBlockIds: string[] = [],
-): { x: number; y: number } {
-  const dashboardWidgets = widgets.filter((w) => widgetIds.includes(w.id));
-  const dashboardTextBlocks = textBlocks.filter((tb) => textBlockIds.includes(tb.id));
-
-  const allItems = [...dashboardWidgets, ...dashboardTextBlocks];
-  if (allItems.length === 0) return { x: 0, y: 0 };
-
-  let maxBottom = 0;
-
-  for (const item of allItems) {
-    const bottom = item.layout.y + item.layout.h;
-    if (bottom > maxBottom) {
-      maxBottom = bottom;
-    }
-  }
-
-  return { x: 0, y: maxBottom };
+  textBlocks: TextBlock[],
+  textBlockIds: string[],
+  amount: number,
+): { widgets: Widget[]; textBlocks: TextBlock[] } {
+  return {
+    widgets: widgets.map((w) =>
+      widgetIds.includes(w.id)
+        ? { ...w, layout: { ...w.layout, y: w.layout.y + amount } }
+        : w,
+    ),
+    textBlocks: textBlocks.map((tb) =>
+      textBlockIds.includes(tb.id)
+        ? { ...tb, layout: { ...tb.layout, y: tb.layout.y + amount } }
+        : tb,
+    ),
+  };
 }
 
 export const useWidgetStore = create<WidgetStore>()(
@@ -212,7 +209,7 @@ export const useWidgetStore = create<WidgetStore>()(
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
-        const pos = getNextPosition(widgets, dashboard?.widgetIds ?? [], textBlocks, dashboard?.textBlockIds ?? []);
+        const newHeight = 3;
         const id = generateId("widget");
 
         const widget: Widget = {
@@ -224,15 +221,24 @@ export const useWidgetStore = create<WidgetStore>()(
           files: {},
           iframeVersion: 0,
           layout: {
-            x: pos.x,
-            y: pos.y,
+            x: 0,
+            y: 0,
             w: 4,
-            h: 3,
+            h: newHeight,
           },
         };
 
+        const shifted = shiftItemsDown(
+          widgets,
+          dashboard?.widgetIds ?? [],
+          textBlocks,
+          dashboard?.textBlockIds ?? [],
+          newHeight,
+        );
+
         set((state) => ({
-          widgets: [...state.widgets, widget],
+          widgets: [...shifted.widgets, widget],
+          textBlocks: shifted.textBlocks,
           dashboards: state.dashboards.map((d) =>
             d.id === dashId ? { ...d, widgetIds: [...d.widgetIds, id] } : d
           ),
@@ -457,22 +463,39 @@ export const useWidgetStore = create<WidgetStore>()(
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
-        const pos = position ?? getNextPosition(widgets, dashboard?.widgetIds ?? [], textBlocks, dashboard?.textBlockIds ?? []);
+        const newHeight = 1;
         const id = generateId("text");
 
         const block: TextBlock = {
           id,
           text: "",
           fontSize: 24,
-          layout: { x: pos.x, y: pos.y, w: 3, h: 1 },
+          layout: { x: position?.x ?? 0, y: position?.y ?? 0, w: 3, h: newHeight },
         };
 
-        set((state) => ({
-          textBlocks: [...state.textBlocks, block],
-          dashboards: state.dashboards.map((d) =>
-            d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
-          ),
-        }));
+        if (!position) {
+          const shifted = shiftItemsDown(
+            widgets,
+            dashboard?.widgetIds ?? [],
+            textBlocks,
+            dashboard?.textBlockIds ?? [],
+            newHeight,
+          );
+          set((state) => ({
+            widgets: shifted.widgets,
+            textBlocks: [...shifted.textBlocks, block],
+            dashboards: state.dashboards.map((d) =>
+              d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
+            ),
+          }));
+        } else {
+          set((state) => ({
+            textBlocks: [...state.textBlocks, block],
+            dashboards: state.dashboards.map((d) =>
+              d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
+            ),
+          }));
+        }
         return id;
       },
 
