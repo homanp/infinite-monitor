@@ -46,7 +46,8 @@ export function DraggableWidget({
 
   const handleDragStart = useCallback(
     (e: React.PointerEvent) => {
-      if (!(e.target as HTMLElement).closest(".drag-handle")) return;
+      const el = e.target as HTMLElement;
+      if (!el.closest(".drag-handle") || el.closest("button")) return;
       e.stopPropagation();
       e.preventDefault();
       dragStart.current = { clientX: e.clientX, clientY: e.clientY };
