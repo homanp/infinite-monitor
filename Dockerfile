@@ -30,13 +30,18 @@ ENV PORT=3000
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Widget build infrastructure
+# Widget template (needed by ensureWorkspace at runtime)
 COPY --from=builder /app/widget-template ./widget-template
-COPY --from=builder /app/data/widget-workspace ./data/widget-workspace
 
-# Writable directories for runtime builds and SQLite
-RUN mkdir -p data/widget-builds data/widgets-dist
+# Pre-built workspace staged for volume seeding
+COPY --from=builder /app/data/widget-workspace ./widget-workspace-seed
+
+# Entrypoint seeds the volume on first boot, then starts the server
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+
+RUN mkdir -p data/widget-workspace data/widget-builds data/widgets-dist
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
