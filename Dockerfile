@@ -10,7 +10,8 @@ RUN npm run build
 
 # Pre-initialize the widget workspace so first widget build is fast
 COPY widget-template/ widget-workspace/
-RUN cd widget-workspace && npm install
+RUN cd widget-workspace && npm install --include=dev
+RUN test -f widget-workspace/node_modules/vite/bin/vite.js || (echo "vite not installed!" && exit 1)
 RUN cd widget-workspace && npx shadcn@latest add --yes \
     button card badge input table tabs scroll-area skeleton separator \
     progress alert avatar checkbox dialog dropdown-menu label popover \
