@@ -318,6 +318,7 @@ async function doBuild(widgetId: string): Promise<void> {
           cwd: WORKSPACE_DIR,
           stdio: "pipe",
           timeout: 30_000,
+          env: { ...process.env, NODE_ENV: "development" },
         });
       }
     }
