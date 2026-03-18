@@ -329,7 +329,7 @@ async function doBuild(widgetId: string): Promise<void> {
 
     try {
       execSync(
-        `node ${JSON.stringify(viteJs)} build --root ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
+        `node ${JSON.stringify(viteJs)} build ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
         {
           cwd: WORKSPACE_DIR,
           stdio: "pipe",
