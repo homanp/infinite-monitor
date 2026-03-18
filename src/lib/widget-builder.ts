@@ -326,18 +326,19 @@ async function doBuild(widgetId: string): Promise<void> {
     const outDir = path.join(DIST_DIR, widgetId);
 
     const viteJs = path.join(WORKSPACE_DIR, "node_modules", "vite", "bin", "vite.js");
+    const wsNodeModules = path.join(WORKSPACE_DIR, "node_modules");
 
     try {
       execSync(
-        `node ${JSON.stringify(viteJs)} build ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
+        `node ${JSON.stringify(viteJs)} build --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
         {
-          cwd: WORKSPACE_DIR,
+          cwd: buildDir,
           stdio: "pipe",
           timeout: BUILD_TIMEOUT_MS,
           env: {
             ...process.env,
             NODE_ENV: "production",
-            NODE_PATH: path.join(WORKSPACE_DIR, "node_modules"),
+            NODE_PATH: wsNodeModules,
           },
         },
       );
