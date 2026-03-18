@@ -336,14 +336,20 @@ async function doBuild(widgetId: string): Promise<void> {
     const buildDir = prepareBuildDir(widgetId, files);
     const outDir = path.join(DIST_DIR, widgetId);
 
+    const viteBin = path.join(WORKSPACE_DIR, "node_modules", ".bin", "vite");
+
     try {
       execSync(
-        `npx vite build --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
+        `${JSON.stringify(viteBin)} build --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
         {
           cwd: buildDir,
           stdio: "pipe",
           timeout: BUILD_TIMEOUT_MS,
-          env: { ...process.env, NODE_ENV: "production" },
+          env: {
+            ...process.env,
+            NODE_ENV: "production",
+            NODE_PATH: path.join(WORKSPACE_DIR, "node_modules"),
+          },
         },
       );
     } catch (buildErr) {
