@@ -325,11 +325,11 @@ async function doBuild(widgetId: string): Promise<void> {
     const buildDir = prepareBuildDir(widgetId, files);
     const outDir = path.join(DIST_DIR, widgetId);
 
-    const viteBin = path.join(WORKSPACE_DIR, "node_modules", ".bin", "vite");
+    const viteJs = path.join(WORKSPACE_DIR, "node_modules", "vite", "bin", "vite.js");
 
     try {
       execSync(
-        `${JSON.stringify(viteBin)} build --root ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
+        `node ${JSON.stringify(viteJs)} build --root ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
         {
           cwd: WORKSPACE_DIR,
           stdio: "pipe",
