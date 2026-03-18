@@ -8,7 +8,7 @@ import {
   writeWidgetFile,
   readWidgetFile,
   rebuildWidget,
-} from "@/lib/widget-runner";
+} from "@/lib/widget-builder";
 import {
   getAllDashboards,
   getWidget,
@@ -29,7 +29,7 @@ interface McpServerPayload {
 
 const SYSTEM_PROMPT = `You are a coding agent that builds React widget components.
 
-The widget runs in a Vite + React environment inside a Docker container.
+The widget runs in a React + esbuild environment. Your code is bundled server-side and served as a static page.
 
 ## What You Are Building
 
@@ -54,7 +54,7 @@ src/
   types.ts                 ← shared types
 \`\`\`
 
-Use the \`writeFile\` tool to write files. Writing \`src/App.tsx\` triggers a container rebuild.
+Use the \`writeFile\` tool to write files. Writing \`src/App.tsx\` triggers a rebuild.
 
 ## Component Rules
 
@@ -75,7 +75,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 ## shadcn/ui Components
 
-All shadcn components are pre-installed. Import from \`@/components/ui/*\`:
+Common shadcn components are available. Import from \`@/components/ui/*\`:
 
 \`\`\`tsx
 import { Button } from "@/components/ui/button";
@@ -116,7 +116,7 @@ Use \`useEffect\` with \`setInterval\` for polling. Always handle loading and er
 
 1. Briefly explain what you will build (1-2 sentences max).
 2. Write helper files first (\`writeFile\` for components, hooks, utils).
-3. Write \`src/App.tsx\` LAST — this triggers the container build.
+3. Write \`src/App.tsx\` LAST — this triggers the build.
 4. Use \`readFile\` to inspect existing code when iterating.
 5. If you spot issues, fix the affected files and write \`src/App.tsx\` again to rebuild.
 

@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { ensureWidget } from "@/lib/widget-runner";
+import * as fs from "fs";
+import * as path from "path";
+import { ensureWidget, getWidgetDistPath } from "@/lib/widget-builder";
 import { getWidgetCode } from "@/db/widgets";
 
 const LOADING_HTML = `<!DOCTYPE html>
@@ -13,6 +15,23 @@ const LOADING_HTML = `<!DOCTYPE html>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 </body>
 </html>`;
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".ico": "image/x-icon",
+};
 
 export async function GET(
   req: NextRequest,
@@ -34,28 +53,26 @@ export async function GET(
     });
   }
 
-  // Proxy to the single runtime container: /<widgetId>/<subPath>
   const subPath = pathSegments?.join("/") ?? "";
-  const targetUrl = `http://localhost:${widget.port}/${id}/${subPath}${req.nextUrl.search}`;
+  const filePath = subPath
+    ? getWidgetDistPath(id, subPath)
+    : getWidgetDistPath(id, "index.html");
 
   try {
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        Accept: req.headers.get("accept") ?? "*/*",
-        "Accept-Encoding": req.headers.get("accept-encoding") ?? "",
-      },
-      signal: AbortSignal.timeout(10000),
-    });
+    if (!fs.existsSync(filePath)) {
+      return new Response("Not found", { status: 404 });
+    }
 
-    const contentType =
-      upstream.headers.get("content-type") ?? "text/html";
+    const content = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
     if (!subPath && contentType.includes("text/html")) {
-      const html = await upstream.text();
+      const html = content.toString("utf-8");
       const baseTag = `<base href="/api/widget/${id}/">`;
       const patched = html.replace("<head>", `<head>${baseTag}`);
       return new Response(patched, {
-        status: upstream.status,
+        status: 200,
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
@@ -63,11 +80,13 @@ export async function GET(
       });
     }
 
-    return new Response(upstream.body, {
-      status: upstream.status,
+    return new Response(content, {
+      status: 200,
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "no-store",
+        "Cache-Control": ext === ".js" || ext === ".css"
+          ? "public, max-age=31536000, immutable"
+          : "no-store",
       },
     });
   } catch {
