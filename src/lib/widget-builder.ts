@@ -193,13 +193,6 @@ function prepareBuildDir(widgetId: string, files: Record<string, string>): strin
   }
   fs.mkdirSync(buildDir, { recursive: true });
 
-  // Symlink node_modules from workspace
-  fs.symlinkSync(
-    path.join(WORKSPACE_DIR, "node_modules"),
-    path.join(buildDir, "node_modules"),
-    "junction",
-  );
-
   // Copy config files from workspace
   for (const cfg of [
     "vite.config.ts",
@@ -234,20 +227,16 @@ function prepareBuildDir(widgetId: string, files: Record<string, string>): strin
     path.join(srcDir, "lib", "utils.ts"),
   );
 
-  // Create components dir and symlink only the shadcn ui/ subdirectory
-  const buildComponents = path.join(srcDir, "components");
-  fs.mkdirSync(buildComponents, { recursive: true });
+  // Copy shadcn ui components (no symlinks — breaks in Docker volumes)
   const workspaceUi = path.join(WORKSPACE_DIR, "src", "components", "ui");
-  const buildUi = path.join(buildComponents, "ui");
+  const buildUi = path.join(srcDir, "components", "ui");
   if (fs.existsSync(workspaceUi)) {
-    fs.symlinkSync(workspaceUi, buildUi, "junction");
+    copyDirSync(workspaceUi, buildUi);
   }
 
   // Write widget source files from SQLite
   for (const [filePath, content] of Object.entries(files)) {
     if (filePath === "deps.json") continue;
-
-    // Skip shadcn ui components — they're symlinked from workspace
     if (filePath.startsWith("src/components/ui/")) continue;
 
     const fullPath = path.join(buildDir, filePath);
@@ -340,9 +329,9 @@ async function doBuild(widgetId: string): Promise<void> {
 
     try {
       execSync(
-        `${JSON.stringify(viteBin)} build --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
+        `${JSON.stringify(viteBin)} build --root ${JSON.stringify(buildDir)} --outDir ${JSON.stringify(outDir)} --emptyOutDir`,
         {
-          cwd: buildDir,
+          cwd: WORKSPACE_DIR,
           stdio: "pipe",
           timeout: BUILD_TIMEOUT_MS,
           env: {
