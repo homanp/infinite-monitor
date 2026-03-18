@@ -14,7 +14,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const TEMPLATE_DIR = path.join(process.cwd(), "widget-template");
 const WORKSPACE_DIR = process.env.WIDGET_WORKSPACE_PATH
   || path.join(DATA_DIR, "widget-workspace");
-const BUILDS_DIR = path.join(DATA_DIR, "widget-builds");
+const BUILDS_DIR = path.join(WORKSPACE_DIR, "builds");
 const DIST_DIR = path.join(DATA_DIR, "widgets-dist");
 
 const MAX_CONCURRENT_BUILDS = 4;
@@ -193,12 +193,6 @@ function prepareBuildDir(widgetId: string, files: Record<string, string>): strin
   }
   fs.mkdirSync(buildDir, { recursive: true });
 
-  // Symlink node_modules from workspace (shell ln -s, not Node junction)
-  execSync(
-    `ln -s ${JSON.stringify(path.join(WORKSPACE_DIR, "node_modules"))} ${JSON.stringify(path.join(buildDir, "node_modules"))}`,
-    { stdio: "pipe" },
-  );
-
   // Copy config files from workspace
   for (const cfg of [
     "vite.config.ts",
@@ -332,7 +326,6 @@ async function doBuild(widgetId: string): Promise<void> {
     const outDir = path.join(DIST_DIR, widgetId);
 
     const viteJs = path.join(WORKSPACE_DIR, "node_modules", "vite", "bin", "vite.js");
-    const wsNodeModules = path.join(WORKSPACE_DIR, "node_modules");
 
     try {
       execSync(
@@ -341,11 +334,7 @@ async function doBuild(widgetId: string): Promise<void> {
           cwd: buildDir,
           stdio: "pipe",
           timeout: BUILD_TIMEOUT_MS,
-          env: {
-            ...process.env,
-            NODE_ENV: "production",
-            NODE_PATH: wsNodeModules,
-          },
+          env: { ...process.env, NODE_ENV: "production" },
         },
       );
     } catch (buildErr) {

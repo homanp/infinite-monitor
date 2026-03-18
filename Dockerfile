@@ -37,7 +37,7 @@ COPY --from=builder /app/widget-template ./widget-template
 # Pre-built workspace lives outside /app/data so the volume doesn't shadow it
 COPY --from=builder /app/widget-workspace ./widget-workspace
 
-RUN mkdir -p data/widget-builds data/widgets-dist
+RUN mkdir -p widget-workspace/builds data/widgets-dist
 
 EXPOSE 3000
 
