@@ -91,23 +91,6 @@ export async function readWidgetFile(
   return files[safePath] ?? null;
 }
 
-export async function listWidgetFiles(widgetId: string): Promise<string[]> {
-  return Object.keys(getWidgetFiles(widgetId)).sort();
-}
-
-export async function deleteWidgetFile(
-  widgetId: string,
-  relativePath: string,
-): Promise<void> {
-  const safePath = sanitizePath(relativePath);
-  if (safePath === "src/App.tsx") {
-    throw new Error("Cannot delete the entry point App.tsx");
-  }
-  const files = getWidgetFiles(widgetId);
-  delete files[safePath];
-  setWidgetFiles(widgetId, files);
-}
-
 // ── Dependencies (stored in files map as deps.json) ──
 
 export async function addWidgetDependencies(
@@ -454,16 +437,6 @@ export async function rebuildWidget(widgetId: string): Promise<WidgetStatus> {
   });
 
   return status;
-}
-
-export async function stopWidget(widgetId: string): Promise<void> {
-  widgetStatuses.delete(widgetId);
-  const widgetDir = path.join(DIST_DIR, widgetId);
-  try {
-    fs.rmSync(widgetDir, { recursive: true, force: true });
-  } catch {
-    // Directory might not exist
-  }
 }
 
 export function getWidgetStatus(widgetId: string): WidgetStatus | null {

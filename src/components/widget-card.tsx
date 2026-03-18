@@ -80,7 +80,6 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
   const iframeLoaded = loadedVersion === widget.iframeVersion;
   const activeWidgetId = useWidgetStore((s) => s.activeWidgetId);
   const setActiveWidget = useWidgetStore((s) => s.setActiveWidget);
-  const clearWidgetCode = useWidgetStore((s) => s.clearWidgetCode);
   const isBuilding = useWidgetStore((s) =>
     s.streamingWidgetIds.includes(widget.id)
   );
@@ -96,15 +95,6 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [expanded, collapse]);
-
-  const handleRebuild = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      clearWidgetCode(widget.id);
-      setActiveWidget(widget.id);
-    },
-    [widget.id, clearWidgetCode, setActiveWidget]
-  );
 
   const iframeSrc = `/api/widget/${widget.id}/`;
 

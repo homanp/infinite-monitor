@@ -177,7 +177,7 @@ function Minimap({
   const mapRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
-  const { rects, viewRect, scale } = useMemo(() => {
+  const { rects, viewRect } = useMemo(() => {
     if (widgets.length === 0)
       return { rects: [], viewRect: { x: 0, y: 0, w: MINIMAP_W, h: MINIMAP_H }, scale: 1 };
 

@@ -14,7 +14,6 @@ export const MARGIN = 12;
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3.0;
-const ZOOM_STEP_BUTTON = 0.05;
 
 interface InfiniteCanvasProps {
   panX: number;

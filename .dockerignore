@@ -6,4 +6,5 @@ node_modules
 data/
 widgets/
 *.md
+!AGENTS.md
 .github/

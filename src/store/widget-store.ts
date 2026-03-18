@@ -121,27 +121,6 @@ function migrateViewports(
   return migrated;
 }
 
-export function shiftItemsDown(
-  widgets: Widget[],
-  widgetIds: string[],
-  textBlocks: TextBlock[],
-  textBlockIds: string[],
-  amount: number,
-): { widgets: Widget[]; textBlocks: TextBlock[] } {
-  return {
-    widgets: widgets.map((w) =>
-      widgetIds.includes(w.id)
-        ? { ...w, layout: { ...w.layout, y: w.layout.y + amount } }
-        : w,
-    ),
-    textBlocks: textBlocks.map((tb) =>
-      textBlockIds.includes(tb.id)
-        ? { ...tb, layout: { ...tb.layout, y: tb.layout.y + amount } }
-        : tb,
-    ),
-  };
-}
-
 export const useWidgetStore = create<WidgetStore>()(
   persist(
     (set, get) => ({
@@ -519,21 +498,12 @@ export const useWidgetStore = create<WidgetStore>()(
           layout: { x: position?.x ?? 0, y: placementY, w: 3, h: newHeight },
         };
 
-        if (!position) {
-          set((state) => ({
-            textBlocks: [...state.textBlocks, block],
-            dashboards: state.dashboards.map((d) =>
-              d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
-            ),
-          }));
-        } else {
-          set((state) => ({
-            textBlocks: [...state.textBlocks, block],
-            dashboards: state.dashboards.map((d) =>
-              d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
-            ),
-          }));
-        }
+        set((state) => ({
+          textBlocks: [...state.textBlocks, block],
+          dashboards: state.dashboards.map((d) =>
+            d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
+          ),
+        }));
         return id;
       },
 

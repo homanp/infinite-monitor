@@ -40,7 +40,6 @@ function TemplateGallery({ containerRef }: { containerRef: React.RefObject<HTMLD
   const applyTemplate = useWidgetStore((s) => s.applyTemplate);
   const renameDashboard = useWidgetStore((s) => s.renameDashboard);
   const setViewport = useWidgetStore((s) => s.setViewport);
-  const activeDashboardId = useWidgetStore((s) => s.activeDashboardId);
   const containerEl = containerRef.current;
 
   useEffect(() => {

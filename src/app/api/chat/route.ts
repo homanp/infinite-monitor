@@ -29,7 +29,7 @@ interface McpServerPayload {
 
 const SYSTEM_PROMPT = `You are a coding agent that builds React widget components.
 
-The widget runs in a Vite + React environment inside a Docker container.
+The widget runs in a Vite + React environment with Tailwind CSS and shadcn/ui.
 
 ## What You Are Building
 
