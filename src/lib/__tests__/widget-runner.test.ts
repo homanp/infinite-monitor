@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizePath, validatePackages } from "@/lib/widget-runner";
+import { sanitizePath, validatePackages } from "@/lib/widget-builder";
 
 describe("sanitizePath", () => {
   it("accepts valid src/ paths", () => {

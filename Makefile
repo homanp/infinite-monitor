@@ -1,16 +1,23 @@
-.PHONY: setup dev build docker clean test lint help
-
-DOCKER_IMAGE := widget-base:latest
-DOCKER_DIR   := docker/widget-base
+.PHONY: setup dev build clean test lint help setup-widgets
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-setup: docker ## Install deps + build Docker image (first-time setup)
+setup: setup-widgets ## Install deps + set up widget workspace (first-time setup)
 	npm install
 
-docker: ## Build the widget runtime Docker image
-	docker build -t $(DOCKER_IMAGE) $(DOCKER_DIR)
+setup-widgets: ## Initialize the widget build workspace (node_modules + shadcn)
+	@echo "Setting up widget workspace..."
+	@mkdir -p data/widget-workspace
+	@cp -r widget-template/* data/widget-workspace/
+	cd data/widget-workspace && npm install
+	cd data/widget-workspace && npx shadcn@latest add --yes \
+		button card badge input table tabs scroll-area skeleton separator \
+		progress alert avatar checkbox dialog dropdown-menu label popover \
+		radio-group select sheet slider switch textarea toggle tooltip \
+		accordion collapsible command context-menu hover-card menubar \
+		navigation-menu pagination resizable sonner
+	@echo "Widget workspace ready."
 
 dev: ## Start the Next.js dev server
 	npm run dev
@@ -27,9 +34,7 @@ test: ## Run tests
 lint: ## Run linter
 	npm run lint
 
-clean: ## Remove build artifacts, Docker container, and volume
-	rm -rf .next node_modules data/widgets.db
-	-docker rm -f widget-runtime 2>/dev/null
-	-docker volume rm widget-runtime-dist 2>/dev/null
+clean: ## Remove build artifacts and data
+	rm -rf .next node_modules data/widgets.db data/widgets-dist data/widget-builds data/widget-workspace
 
-all: setup dev ## Full bootstrap: install, build Docker, start dev server
+all: setup dev ## Full bootstrap: install, set up widgets, start dev server

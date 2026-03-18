@@ -54,35 +54,46 @@ function TemplateGallery({ containerRef }: { containerRef: React.RefObject<HTMLD
   const handleApply = async (template: Template) => {
     setApplying(template.name);
     applyTemplate(template);
-    if (activeDashboardId) {
-      renameDashboard(activeDashboardId, template.name);
+
+    // Read fresh state after applyTemplate (may have created a new dashboard)
+    const freshState = useWidgetStore.getState();
+    const dashId = freshState.activeDashboardId;
+
+    if (dashId) {
+      renameDashboard(dashId, template.name);
     }
 
-    // Fit-to-view after applying template
-    if (activeDashboardId && containerEl) {
+    // Fit-to-view: use actual widget positions from store
+    if (dashId && containerEl) {
       const stepX = CELL_W + MARGIN;
       const stepY = CELL_H + MARGIN;
+      const dashboard = freshState.dashboards.find((d) => d.id === dashId);
+      const dashWidgetIds = dashboard?.widgetIds ?? [];
+
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const w of template.widgets) {
-        const layout = w.layoutJson ? JSON.parse(w.layoutJson) : { x: 0, y: 0, w: 4, h: 3 };
-        const px = layout.x * stepX;
-        const py = layout.y * stepY;
-        const pw = layout.w * stepX - MARGIN;
-        const ph = layout.h * stepY - MARGIN;
+      for (const w of freshState.widgets) {
+        if (!dashWidgetIds.includes(w.id)) continue;
+        const px = w.layout.x * stepX;
+        const py = w.layout.y * stepY;
+        const pw = w.layout.w * stepX - MARGIN;
+        const ph = w.layout.h * stepY - MARGIN;
         minX = Math.min(minX, px);
         minY = Math.min(minY, py);
         maxX = Math.max(maxX, px + pw);
         maxY = Math.max(maxY, py + ph);
       }
-      const contentW = maxX - minX;
-      const contentH = maxY - minY;
-      const padding = 60;
-      const cw = containerEl.clientWidth;
-      const ch = containerEl.clientHeight;
-      const fitZoom = Math.min(1, Math.min((cw - padding * 2) / contentW, (ch - padding * 2) / contentH));
-      const fitPanX = (cw - contentW * fitZoom) / 2 - minX * fitZoom;
-      const fitPanY = (ch - contentH * fitZoom) / 2 - minY * fitZoom;
-      setViewport(activeDashboardId, { panX: fitPanX, panY: fitPanY, zoom: fitZoom });
+
+      if (minX !== Infinity) {
+        const contentW = maxX - minX;
+        const contentH = maxY - minY;
+        const padding = 60;
+        const cw = containerEl.clientWidth;
+        const ch = containerEl.clientHeight;
+        const fitZoom = Math.min(1, Math.min((cw - padding * 2) / contentW, (ch - padding * 2) / contentH));
+        const fitPanX = (cw - contentW * fitZoom) / 2 - minX * fitZoom;
+        const fitPanY = (ch - contentH * fitZoom) / 2 - minY * fitZoom;
+        setViewport(dashId, { panX: fitPanX, panY: fitPanY, zoom: fitZoom });
+      }
     }
 
     scheduleSyncToServer();

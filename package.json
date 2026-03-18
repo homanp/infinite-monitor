@@ -47,10 +47,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "dockerode": "^4.0.9",
     "drizzle-orm": "^0.45.1",
     "geist": "^1.7.0",
-    "get-port": "^7.1.0",
     "just-bash": "^2.13.0",
     "lucide-react": "^0.577.0",
     "motion": "^12.35.2",
@@ -69,7 +67,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/dockerode": "^4.0.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -79,7 +76,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "playwright": "^1.58.2",
-    "tailwindcss": "^4",
+    "tailwindcss": "^4.2.1",
     "typescript": "^5",
     "vitest": "^4.1.0"
   }

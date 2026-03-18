@@ -3,7 +3,7 @@ import {
   writeWidgetFile,
   addWidgetDependencies,
   rebuildWidget,
-} from "@/lib/widget-runner";
+} from "@/lib/widget-builder";
 
 export async function POST(request: Request) {
   const { widgets } = (await request.json()) as {

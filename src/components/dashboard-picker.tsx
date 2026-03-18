@@ -133,7 +133,7 @@ export function DashboardPicker() {
       </Button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-[220px] border border-zinc-700 bg-zinc-800 shadow-xl">
+        <div className="absolute top-full right-0 mt-1 z-50 min-w-[220px] border border-zinc-700 bg-zinc-800 shadow-xl">
           <div className="py-1">
             {dashboards.map((d) => (
               <div

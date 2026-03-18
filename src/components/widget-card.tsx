@@ -76,6 +76,8 @@ interface WidgetCardProps {
 
 export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
+  const iframeLoaded = loadedVersion === widget.iframeVersion;
   const activeWidgetId = useWidgetStore((s) => s.activeWidgetId);
   const setActiveWidget = useWidgetStore((s) => s.setActiveWidget);
   const clearWidgetCode = useWidgetStore((s) => s.clearWidgetCode);
@@ -167,11 +169,13 @@ export function WidgetCard({ widget, onRemove }: WidgetCardProps) {
     if (widget.code) {
       return (
         <CardContent className="relative flex-1 min-h-0 p-0! overflow-hidden">
+          {!iframeLoaded && <StaticNoise />}
           <iframe
             key={widget.iframeVersion}
             src={iframeSrc}
             className="absolute inset-0 w-full h-full border-0"
             title={widget.title}
+            onLoad={() => setLoadedVersion(widget.iframeVersion)}
           />
         </CardContent>
       );

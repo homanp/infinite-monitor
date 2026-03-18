@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Widget workspace and template (separate Vite/Tailwind v3 project)
+    "data/**",
+    "widget-template/**",
   ]),
 ]);
 

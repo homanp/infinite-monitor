@@ -8,7 +8,7 @@ import {
   writeWidgetFile,
   readWidgetFile,
   rebuildWidget,
-} from "@/lib/widget-runner";
+} from "@/lib/widget-builder";
 import {
   getAllDashboards,
   getWidget,

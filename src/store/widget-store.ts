@@ -209,8 +209,22 @@ export const useWidgetStore = create<WidgetStore>()(
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
+        const widgetIds = dashboard?.widgetIds ?? [];
+        const textBlockIds = dashboard?.textBlockIds ?? [];
         const newHeight = 3;
         const id = generateId("widget");
+
+        let maxBottom = 0;
+        for (const w of widgets) {
+          if (widgetIds.includes(w.id)) {
+            maxBottom = Math.max(maxBottom, w.layout.y + w.layout.h);
+          }
+        }
+        for (const tb of textBlocks) {
+          if (textBlockIds.includes(tb.id)) {
+            maxBottom = Math.max(maxBottom, tb.layout.y + (tb.layout.h ?? 1));
+          }
+        }
 
         const widget: Widget = {
           id,
@@ -222,23 +236,14 @@ export const useWidgetStore = create<WidgetStore>()(
           iframeVersion: 0,
           layout: {
             x: 0,
-            y: 0,
+            y: maxBottom,
             w: 4,
             h: newHeight,
           },
         };
 
-        const shifted = shiftItemsDown(
-          widgets,
-          dashboard?.widgetIds ?? [],
-          textBlocks,
-          dashboard?.textBlockIds ?? [],
-          newHeight,
-        );
-
         set((state) => ({
-          widgets: [...shifted.widgets, widget],
-          textBlocks: shifted.textBlocks,
+          widgets: [...state.widgets, widget],
           dashboards: state.dashboards.map((d) =>
             d.id === dashId ? { ...d, widgetIds: [...d.widgetIds, id] } : d
           ),
@@ -396,7 +401,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       applyTemplate: (template) => {
-        const { dashboards, activeDashboardId } = get();
+        const { dashboards, activeDashboardId, widgets, textBlocks } = get();
         let dashId = activeDashboardId;
 
         if (!dashId || !dashboards.find((d) => d.id === dashId)) {
@@ -407,12 +412,35 @@ export const useWidgetStore = create<WidgetStore>()(
           }));
         }
 
-        const newWidgets: Widget[] = template.widgets.map((tw) => {
+        const dashboard = get().dashboards.find((d) => d.id === dashId);
+        const existingWidgetIds = dashboard?.widgetIds ?? [];
+        const existingTextBlockIds = dashboard?.textBlockIds ?? [];
+
+        // Find the bottom edge of existing content on this dashboard
+        let maxBottom = 0;
+        for (const w of widgets) {
+          if (existingWidgetIds.includes(w.id)) {
+            maxBottom = Math.max(maxBottom, w.layout.y + w.layout.h);
+          }
+        }
+        for (const tb of textBlocks) {
+          if (existingTextBlockIds.includes(tb.id)) {
+            maxBottom = Math.max(maxBottom, tb.layout.y + (tb.layout.h ?? 1));
+          }
+        }
+
+        // Normalize template positions so they start at y=0
+        const parsedLayouts = template.widgets.map((tw) =>
+          tw.layoutJson ? JSON.parse(tw.layoutJson) : { x: 0, y: 0, w: 4, h: 3 }
+        );
+        const minTemplateY = Math.min(...parsedLayouts.map((l: { y?: number }) => l.y ?? 0));
+
+        const newWidgets: Widget[] = template.widgets.map((tw, i) => {
           const id = generateId("widget");
-          const parsed = tw.layoutJson ? JSON.parse(tw.layoutJson) : {};
+          const parsed = parsedLayouts[i];
           const layout: CanvasLayout = {
             x: parsed.x ?? 0,
-            y: parsed.y ?? 0,
+            y: (parsed.y ?? 0) - minTemplateY + maxBottom,
             w: parsed.w ?? 4,
             h: parsed.h ?? 3,
           };
@@ -463,27 +491,37 @@ export const useWidgetStore = create<WidgetStore>()(
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
+        const widgetIds = dashboard?.widgetIds ?? [];
+        const textBlockIds = dashboard?.textBlockIds ?? [];
         const newHeight = 1;
         const id = generateId("text");
+
+        let placementY = position?.y ?? 0;
+        if (!position) {
+          let maxBottom = 0;
+          for (const w of widgets) {
+            if (widgetIds.includes(w.id)) {
+              maxBottom = Math.max(maxBottom, w.layout.y + w.layout.h);
+            }
+          }
+          for (const tb of textBlocks) {
+            if (textBlockIds.includes(tb.id)) {
+              maxBottom = Math.max(maxBottom, tb.layout.y + (tb.layout.h ?? 1));
+            }
+          }
+          placementY = maxBottom;
+        }
 
         const block: TextBlock = {
           id,
           text: "",
           fontSize: 24,
-          layout: { x: position?.x ?? 0, y: position?.y ?? 0, w: 3, h: newHeight },
+          layout: { x: position?.x ?? 0, y: placementY, w: 3, h: newHeight },
         };
 
         if (!position) {
-          const shifted = shiftItemsDown(
-            widgets,
-            dashboard?.widgetIds ?? [],
-            textBlocks,
-            dashboard?.textBlockIds ?? [],
-            newHeight,
-          );
           set((state) => ({
-            widgets: shifted.widgets,
-            textBlocks: [...shifted.textBlocks, block],
+            textBlocks: [...state.textBlocks, block],
             dashboards: state.dashboards.map((d) =>
               d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
             ),
