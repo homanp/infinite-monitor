@@ -193,6 +193,12 @@ function prepareBuildDir(widgetId: string, files: Record<string, string>): strin
   }
   fs.mkdirSync(buildDir, { recursive: true });
 
+  // Symlink node_modules from workspace (shell ln -s, not Node junction)
+  execSync(
+    `ln -s ${JSON.stringify(path.join(WORKSPACE_DIR, "node_modules"))} ${JSON.stringify(path.join(buildDir, "node_modules"))}`,
+    { stdio: "pipe" },
+  );
+
   // Copy config files from workspace
   for (const cfg of [
     "vite.config.ts",
