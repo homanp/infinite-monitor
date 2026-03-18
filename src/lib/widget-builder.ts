@@ -12,7 +12,8 @@ import {
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const TEMPLATE_DIR = path.join(process.cwd(), "widget-template");
-const WORKSPACE_DIR = path.join(DATA_DIR, "widget-workspace");
+const WORKSPACE_DIR = process.env.WIDGET_WORKSPACE_PATH
+  || path.join(DATA_DIR, "widget-workspace");
 const BUILDS_DIR = path.join(DATA_DIR, "widget-builds");
 const DIST_DIR = path.join(DATA_DIR, "widgets-dist");
 
