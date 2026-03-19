@@ -1,15 +1,24 @@
 import {
   NodeRuntime,
+  NodeFileSystem,
   createNodeDriver,
   createNodeRuntimeDriverFactory,
-  createInMemoryFileSystem,
   allowAllFs,
   allowAllNetwork,
   allowAllChildProcess,
   type CommandExecutor,
-  type VirtualFileSystem,
 } from "secure-exec";
-import { spawn } from "node:child_process";
+import { spawn, exec as execCb, execSync } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+} from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import getPort, { portNumbers } from "get-port";
 import {
   getWidgetFiles,
@@ -17,6 +26,8 @@ import {
   getWidget,
   upsertWidget,
 } from "@/db/widgets";
+
+const execAsync = promisify(execCb);
 
 // ── Types ──
 
@@ -26,46 +37,40 @@ interface WidgetStatus {
   startedAt?: number;
 }
 
-interface WidgetRuntime {
+interface WidgetSandbox {
   runtime: NodeRuntime;
   port: number;
-  execPromise?: Promise<unknown>;
+  sandboxDir: string;
 }
 
-// ── Per-widget SecureExec runtimes ──
+// ── Per-widget state ──
 
-const widgetRuntimes = new Map<string, WidgetRuntime>();
+const widgetSandboxes = new Map<string, WidgetSandbox>();
 const widgetStatuses = new Map<string, WidgetStatus>();
 const buildLocks = new Map<string, Promise<void>>();
 
+// ── Command executor: bridges SecureExec child_process to host ──
+
 const commandExecutor: CommandExecutor = {
   spawn(command, args, options) {
-    const resolvedCommand = command === "node" ? process.execPath : command;
-    const child = spawn(resolvedCommand, args, {
+    const resolved = command === "node" ? process.execPath : command;
+    const child = spawn(resolved, args, {
       cwd: options.cwd ?? undefined,
-      env: options.env as NodeJS.ProcessEnv | undefined,
+      env: { ...process.env, ...(options.env ?? {}) } as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      options.onStdout?.(new Uint8Array(chunk));
-    });
-    child.stderr!.on("data", (chunk: Buffer) => {
-      options.onStderr?.(new Uint8Array(chunk));
-    });
-
+    child.on("error", (err) =>
+      options.onStderr?.(new TextEncoder().encode(`spawn error: ${err.message}`)),
+    );
+    child.stdout!.on("data", (c: Buffer) => options.onStdout?.(new Uint8Array(c)));
+    child.stderr!.on("data", (c: Buffer) => options.onStderr?.(new Uint8Array(c)));
     return {
-      writeStdin(data: Uint8Array | string) {
-        child.stdin!.write(data);
-      },
-      closeStdin() {
-        child.stdin!.end();
-      },
-      kill(signal?: number) {
-        child.kill(signal);
-      },
+      writeStdin(data: Uint8Array | string) { child.stdin!.write(data); },
+      closeStdin() { child.stdin!.end(); },
+      kill(signal?: number) { child.kill(signal); },
       wait() {
         return new Promise<number>((resolve) => {
+          child.once("error", () => resolve(1));
           child.once("close", (code: number | null) => resolve(code ?? 1));
         });
       },
@@ -73,155 +78,83 @@ const commandExecutor: CommandExecutor = {
   },
 };
 
-// ── Template files (embedded from docker/widget-base/template) ──
+// ── Template content ──
 
-const TEMPLATE_INDEX_HTML = `<!DOCTYPE html>
-<html lang="en" class="dark">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Widget</title>
-  </head>
-  <body style="margin:0; background:transparent;">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>`;
+const TEMPLATES: Record<string, string> = {
+  "index.html": `<!DOCTYPE html>\n<html lang="en" class="dark">\n  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Widget</title></head>\n  <body style="margin:0; background:transparent;"><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>\n</html>`,
 
-const TEMPLATE_MAIN_TSX = `import React from "react";
-import { createRoot } from "react-dom/client";
-import "./index.css";
-import App from "./App";
+  "src/main.tsx": `import React from "react";\nimport { createRoot } from "react-dom/client";\nimport "./index.css";\nimport App from "./App";\n\ncreateRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);`,
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);`;
+  "src/index.css": `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n*, *::before, *::after { box-sizing: border-box; }\nhtml, body { margin:0; padding:0; width:100%; height:100%; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size:13px; overflow:hidden; background:transparent; color:#f4f4f5; }\n#root { width:100%; height:100%; }\n::-webkit-scrollbar { width:4px; height:4px; }\n::-webkit-scrollbar-track { background:transparent; }\n::-webkit-scrollbar-thumb { background:#525252; border-radius:2px; }\n* { scrollbar-width:thin; scrollbar-color:#525252 transparent; }`,
 
-const TEMPLATE_INDEX_CSS = `@tailwind base;
-@tailwind components;
-@tailwind utilities;
+  "src/lib/utils.ts": `import { clsx, type ClassValue } from "clsx";\nimport { twMerge } from "tailwind-merge";\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}`,
 
-*, *::before, *::after { box-sizing: border-box; }
+  "vite.config.ts": `import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\nimport path from "path";\n\nexport default defineConfig({\n  plugins: [react()],\n  base: "./",\n  resolve: { alias: { "@": path.resolve(__dirname, "./src") } },\n  server: { hmr: false },\n});`,
 
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  overflow: hidden;
-  background: transparent;
-  color: #f4f4f5;
+  "tsconfig.json": JSON.stringify({ compilerOptions: { target: "ES2020", useDefineForClassFields: true, lib: ["ES2020", "DOM", "DOM.Iterable"], module: "ESNext", skipLibCheck: true, moduleResolution: "bundler", allowImportingTsExtensions: true, resolveJsonModule: true, isolatedModules: true, noEmit: true, jsx: "react-jsx", strict: true, noUnusedLocals: false, noUnusedParameters: false, noFallthroughCasesInSwitch: true, paths: { "@/*": ["./src/*"] } }, include: ["src"] }, null, 2),
+
+  "postcss.config.js": `export default { plugins: { tailwindcss: {}, autoprefixer: {} } };`,
+
+  "tailwind.config.ts": `/** @type {import('tailwindcss').Config} */\nexport default { darkMode: "class", content: ["./index.html", "./src/**/*.{ts,tsx}"], theme: { extend: {} }, plugins: [] };`,
+
+  "package.json": JSON.stringify({ name: "widget", private: true, version: "0.0.1", type: "module", scripts: { build: "vite build" }, dependencies: { react: "^18.3.1", "react-dom": "^18.3.1", "class-variance-authority": "^0.7.1", clsx: "^2.1.1", "tailwind-merge": "^2.5.2", "lucide-react": "^0.400.0", recharts: "^2.15.0", "date-fns": "^4.1.0", "maplibre-gl": "^4.7.0", "framer-motion": "^11.0.0", "@tanstack/react-query": "^5.0.0" }, devDependencies: { "@vitejs/plugin-react": "^4.3.1", "@types/react": "^18.3.3", "@types/react-dom": "^18.3.0", tailwindcss: "^3.4.1", autoprefixer: "^10.4.20", postcss: "^8.4.40", typescript: "^5.5.3", vite: "^5.4.1" } }, null, 2),
+
+  "components.json": JSON.stringify({ "$schema": "https://ui.shadcn.com/schema.json", style: "default", rsc: false, tsx: true, tailwind: { config: "tailwind.config.ts", css: "src/index.css", baseColor: "neutral", cssVariables: true }, aliases: { components: "@/components", utils: "@/lib/utils", ui: "@/components/ui", lib: "@/lib", hooks: "@/hooks" } }),
+};
+
+const SHADCN_COMPONENTS = "button card badge input table tabs scroll-area skeleton separator progress alert avatar checkbox dialog dropdown-menu label popover radio-group select sheet slider switch textarea toggle tooltip accordion collapsible command context-menu hover-card menubar navigation-menu pagination resizable sonner";
+
+// ── Shared base template (created once, copied into each sandbox) ──
+
+let baseTemplateDir: string | null = null;
+let baseTemplatePromise: Promise<string> | null = null;
+
+async function ensureBaseTemplate(): Promise<string> {
+  if (baseTemplateDir && existsSync(join(baseTemplateDir, "node_modules"))) {
+    return baseTemplateDir;
+  }
+  if (baseTemplatePromise) return baseTemplatePromise;
+
+  baseTemplatePromise = (async () => {
+    const dir = join(tmpdir(), "widget-base-template");
+
+    if (existsSync(join(dir, "node_modules", ".package-lock.json"))) {
+      baseTemplateDir = dir;
+      console.log("[secure-exec] Reusing base template at", dir);
+      return dir;
+    }
+
+    console.log("[secure-exec] Installing shared base template...");
+    for (const [path, content] of Object.entries(TEMPLATES)) {
+      const full = join(dir, path);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, content);
+    }
+
+    await execAsync("npm install", { cwd: dir, timeout: 120_000 });
+    console.log("[secure-exec] npm install done");
+
+    try {
+      await execAsync(`npx shadcn@latest add --yes ${SHADCN_COMPONENTS}`, {
+        cwd: dir,
+        timeout: 120_000,
+      });
+      console.log("[secure-exec] shadcn components installed");
+    } catch {
+      console.warn("[secure-exec] Some shadcn components may have failed (non-fatal)");
+    }
+
+    console.log("[secure-exec] Base template ready at", dir);
+    baseTemplateDir = dir;
+    return dir;
+  })();
+
+  try {
+    return await baseTemplatePromise;
+  } finally {
+    baseTemplatePromise = null;
+  }
 }
-
-#root { width: 100%; height: 100%; }
-
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #525252; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #737373; }
-* { scrollbar-width: thin; scrollbar-color: #525252 transparent; }`;
-
-const TEMPLATE_UTILS_TS = `import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}`;
-
-const TEMPLATE_VITE_CONFIG = `import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "path";
-
-export default defineConfig({
-  plugins: [react()],
-  base: "./",
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    hmr: false,
-  },
-});`;
-
-const TEMPLATE_TSCONFIG = JSON.stringify({
-  compilerOptions: {
-    target: "ES2020",
-    useDefineForClassFields: true,
-    lib: ["ES2020", "DOM", "DOM.Iterable"],
-    module: "ESNext",
-    skipLibCheck: true,
-    moduleResolution: "bundler",
-    allowImportingTsExtensions: true,
-    resolveJsonModule: true,
-    isolatedModules: true,
-    noEmit: true,
-    jsx: "react-jsx",
-    strict: true,
-    noUnusedLocals: false,
-    noUnusedParameters: false,
-    noFallthroughCasesInSwitch: true,
-    paths: { "@/*": ["./src/*"] },
-  },
-  include: ["src"],
-}, null, 2);
-
-const TEMPLATE_POSTCSS_CONFIG = `export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-};`;
-
-const TEMPLATE_TAILWIND_CONFIG = `/** @type {import('tailwindcss').Config} */
-export default {
-  darkMode: "class",
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-};`;
-
-const TEMPLATE_PACKAGE_JSON = JSON.stringify({
-  name: "widget",
-  private: true,
-  version: "0.0.1",
-  type: "module",
-  scripts: {
-    dev: "vite --host 0.0.0.0 --port 3000",
-    build: "vite build",
-    preview: "vite preview --host 0.0.0.0 --port 3000",
-  },
-  dependencies: {
-    react: "^18.3.1",
-    "react-dom": "^18.3.1",
-    "class-variance-authority": "^0.7.1",
-    clsx: "^2.1.1",
-    "tailwind-merge": "^2.5.2",
-    "lucide-react": "^0.400.0",
-    recharts: "^2.15.0",
-    "date-fns": "^4.1.0",
-    "maplibre-gl": "^4.7.0",
-    "framer-motion": "^11.0.0",
-    "@tanstack/react-query": "^5.0.0",
-  },
-  devDependencies: {
-    "@vitejs/plugin-react": "^4.3.1",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "tailwindcss": "^3.4.1",
-    autoprefixer: "^10.4.20",
-    postcss: "^8.4.40",
-    typescript: "^5.5.3",
-    vite: "^5.4.1",
-  },
-}, null, 2);
 
 // ── Security ──
 
@@ -229,20 +162,16 @@ const VALID_PACKAGE_RE = /^(@[\w.-]+\/)?[\w.-]+(@[\w.^~>=<| -]+)?$/;
 
 export function sanitizePath(relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, "/");
-  if (normalized.startsWith("/") || normalized.includes("..")) {
+  if (normalized.startsWith("/") || normalized.includes(".."))
     throw new Error(`Invalid path: ${relativePath}`);
-  }
-  if (!normalized.startsWith("src/")) {
+  if (!normalized.startsWith("src/"))
     throw new Error(`Path must be under src/: ${relativePath}`);
-  }
   return normalized;
 }
 
 export function validatePackages(packages: string[]): void {
   for (const pkg of packages) {
-    if (!VALID_PACKAGE_RE.test(pkg)) {
-      throw new Error(`Invalid package name: ${pkg}`);
-    }
+    if (!VALID_PACKAGE_RE.test(pkg)) throw new Error(`Invalid package name: ${pkg}`);
   }
 }
 
@@ -256,7 +185,6 @@ export async function writeWidgetFile(
   const safePath = sanitizePath(relativePath);
   const files = getWidgetFiles(widgetId);
   files[safePath] = content;
-
   const existing = getWidget(widgetId);
   if (existing) {
     setWidgetFiles(widgetId, files);
@@ -273,9 +201,7 @@ export async function readWidgetFile(
   widgetId: string,
   relativePath: string,
 ): Promise<string | null> {
-  const safePath = sanitizePath(relativePath);
-  const files = getWidgetFiles(widgetId);
-  return files[safePath] ?? null;
+  return getWidgetFiles(widgetId)[sanitizePath(relativePath)] ?? null;
 }
 
 export async function listWidgetFiles(widgetId: string): Promise<string[]> {
@@ -287,15 +213,11 @@ export async function deleteWidgetFile(
   relativePath: string,
 ): Promise<void> {
   const safePath = sanitizePath(relativePath);
-  if (safePath === "src/App.tsx") {
-    throw new Error("Cannot delete the entry point App.tsx");
-  }
+  if (safePath === "src/App.tsx") throw new Error("Cannot delete the entry point App.tsx");
   const files = getWidgetFiles(widgetId);
   delete files[safePath];
   setWidgetFiles(widgetId, files);
 }
-
-// ── Dependencies (stored in files map as deps.json) ──
 
 export async function addWidgetDependencies(
   widgetId: string,
@@ -304,92 +226,90 @@ export async function addWidgetDependencies(
   validatePackages(packages);
   const files = getWidgetFiles(widgetId);
   let existing: string[] = [];
-  try {
-    if (files["deps.json"]) {
-      existing = JSON.parse(files["deps.json"]);
-    }
-  } catch {
-    // ignore
-  }
+  try { if (files["deps.json"]) existing = JSON.parse(files["deps.json"]); } catch { /* */ }
   const merged = [...new Set([...existing, ...packages])];
   files["deps.json"] = JSON.stringify(merged);
   setWidgetFiles(widgetId, files);
   return merged;
 }
 
-// ── SecureExec runtime management ──
+// ── Sandbox creation ──
 
-function createWidgetRuntime(): {
-  runtime: NodeRuntime;
-  filesystem: VirtualFileSystem;
-} {
-  const filesystem = createInMemoryFileSystem();
-  const runtime = new NodeRuntime({
-    systemDriver: createNodeDriver({
-      filesystem,
-      useDefaultNetwork: true,
-      commandExecutor,
-      permissions: {
-        ...allowAllFs,
-        ...allowAllNetwork,
-        ...allowAllChildProcess,
-      },
-    }),
-    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
-    memoryLimit: 256,
-    cpuTimeLimitMs: 120_000,
+function createSandboxDir(baseDir: string, files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "widget-sandbox-"));
+
+  for (const name of ["vite.config.ts", "tsconfig.json", "postcss.config.js", "tailwind.config.ts", "index.html", "package.json", "components.json"]) {
+    const src = join(baseDir, name);
+    if (existsSync(src)) {
+      try { execSync(`cp "${src}" "${join(dir, name)}"`, { stdio: "pipe" }); } catch { /* */ }
+    }
+  }
+
+  execSync(`ln -s "${join(baseDir, "node_modules")}" "${join(dir, "node_modules")}"`, { stdio: "pipe" });
+  execSync(`cp -r "${join(baseDir, "src")}" "${join(dir, "src")}"`, { stdio: "pipe" });
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (filePath === "deps.json") continue;
+    const fullPath = join(dir, filePath);
+    mkdirSync(join(fullPath, ".."), { recursive: true });
+    writeFileSync(fullPath, content);
+  }
+
+  return dir;
+}
+
+function startFileServer(runtime: NodeRuntime, distDir: string, port: number): Promise<unknown> {
+  return runtime.exec(`
+    (async () => {
+      const http = require("node:http");
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const distDir = ${JSON.stringify(distDir)};
+      const mimeTypes = { ".html":"text/html; charset=utf-8", ".js":"application/javascript; charset=utf-8", ".mjs":"application/javascript; charset=utf-8", ".css":"text/css; charset=utf-8", ".json":"application/json; charset=utf-8", ".png":"image/png", ".jpg":"image/jpeg", ".svg":"image/svg+xml", ".ico":"image/x-icon", ".woff":"font/woff", ".woff2":"font/woff2" };
+      const server = http.createServer((req, res) => {
+        let p = new URL(req.url, "http://localhost").pathname;
+        if (p === "/" || p === "") p = "/index.html";
+        const fp = path.join(distDir, p);
+        try {
+          if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
+            const ext = path.extname(fp).toLowerCase();
+            res.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream", "Cache-Control": "no-store" });
+            res.end(fs.readFileSync(fp));
+          } else {
+            const idx = path.join(distDir, "index.html");
+            if (fs.existsSync(idx)) { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }); res.end(fs.readFileSync(idx)); }
+            else { res.writeHead(404); res.end("Not Found"); }
+          }
+        } catch { res.writeHead(500); res.end("Error"); }
+      });
+      await new Promise((ok, fail) => { server.once("error", fail); server.listen(${port}, "127.0.0.1", ok); });
+      console.log("SERVER_LISTENING:${port}");
+      await new Promise(() => {});
+    })().catch(e => { console.error("SERVER_ERROR:", e.message); process.exitCode = 1; });
+  `, {
+    onStdio: (event) => {
+      if (event.message.includes("SERVER_LISTENING"))
+        console.log(`[secure-exec] File server on port ${port}`);
+    },
   });
-
-  return { runtime, filesystem };
 }
 
-async function ensureDir(filesystem: VirtualFileSystem, path: string): Promise<void> {
-  const parts = path.split("/").filter(Boolean);
-  let current = "";
-  for (const part of parts) {
-    current += "/" + part;
-    const exists = await filesystem.exists(current);
-    if (!exists) {
-      await filesystem.mkdir(current);
-    }
+async function waitForServer(url: string, timeout = 10000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (r.ok || r.status === 404) return;
+    } catch { /* not ready */ }
+    await new Promise((r) => setTimeout(r, 200));
   }
+  throw new Error(`Server at ${url} timed out`);
 }
 
-async function writeTemplateFiles(
-  filesystem: VirtualFileSystem,
-  widgetId: string,
-  files: Record<string, string>,
-): Promise<void> {
-  const widgetDir = `/app/widgets/${widgetId}`;
-
-  await ensureDir(filesystem, widgetDir);
-  await ensureDir(filesystem, `${widgetDir}/src`);
-  await ensureDir(filesystem, `${widgetDir}/src/lib`);
-  await ensureDir(filesystem, `${widgetDir}/src/components`);
-
-  await filesystem.writeFile(`${widgetDir}/index.html`, TEMPLATE_INDEX_HTML);
-  await filesystem.writeFile(`${widgetDir}/src/main.tsx`, TEMPLATE_MAIN_TSX);
-  await filesystem.writeFile(`${widgetDir}/src/index.css`, TEMPLATE_INDEX_CSS);
-  await filesystem.writeFile(`${widgetDir}/src/lib/utils.ts`, TEMPLATE_UTILS_TS);
-  await filesystem.writeFile(`${widgetDir}/vite.config.ts`, TEMPLATE_VITE_CONFIG);
-  await filesystem.writeFile(`${widgetDir}/tsconfig.json`, TEMPLATE_TSCONFIG);
-  await filesystem.writeFile(`${widgetDir}/postcss.config.js`, TEMPLATE_POSTCSS_CONFIG);
-  await filesystem.writeFile(`${widgetDir}/tailwind.config.ts`, TEMPLATE_TAILWIND_CONFIG);
-  await filesystem.writeFile(`${widgetDir}/package.json`, TEMPLATE_PACKAGE_JSON);
-
-  for (const [path, content] of Object.entries(files)) {
-    if (path === "deps.json") continue;
-    if (path.includes("/")) {
-      const dir = `${widgetDir}/${path.substring(0, path.lastIndexOf("/"))}`;
-      await ensureDir(filesystem, dir);
-    }
-    await filesystem.writeFile(`${widgetDir}/${path}`, content);
-  }
-}
+// ── Build pipeline ──
 
 async function doBuild(widgetId: string): Promise<void> {
   const port = await getPort({ port: portNumbers(4100, 4999) });
-
   widgetStatuses.set(widgetId, { status: "building", port, startedAt: Date.now() });
 
   try {
@@ -400,186 +320,52 @@ async function doBuild(widgetId: string): Promise<void> {
       return;
     }
 
-    const existing = widgetRuntimes.get(widgetId);
-    if (existing) {
-      try {
-        await existing.runtime.terminate();
-        existing.runtime.dispose();
-      } catch {
-        // ignore
-      }
-      widgetRuntimes.delete(widgetId);
+    const prev = widgetSandboxes.get(widgetId);
+    if (prev) {
+      try { await prev.runtime.terminate(); prev.runtime.dispose(); } catch { /* */ }
+      try { rmSync(prev.sandboxDir, { recursive: true, force: true }); } catch { /* */ }
+      widgetSandboxes.delete(widgetId);
     }
 
-    const { runtime, filesystem } = createWidgetRuntime();
-    await writeTemplateFiles(filesystem, widgetId, files);
+    const baseDir = await ensureBaseTemplate();
+    const sandboxDir = createSandboxDir(baseDir, files);
+    const distDir = join(sandboxDir, "dist");
 
-    const widgetDir = `/app/widgets/${widgetId}`;
-    const distDir = `/app/dist/${widgetId}`;
-
-    let depsInstallCode = "";
+    let extraDeps: string[] = [];
     if (files["deps.json"]) {
-      try {
-        const deps: string[] = JSON.parse(files["deps.json"]);
-        if (deps.length > 0) {
-          depsInstallCode = `
-        execSync("npm install --no-save ${deps.join(" ")}", { cwd: widgetDir, stdio: "pipe" });`;
-        }
-      } catch {
-        // ignore
-      }
+      try { extraDeps = JSON.parse(files["deps.json"]); } catch { /* */ }
+    }
+    if (extraDeps.length > 0) {
+      await execAsync(`npm install --no-save ${extraDeps.join(" ")}`, { cwd: sandboxDir, timeout: 60_000 });
     }
 
-    const buildScript = `
-      const { execSync } = require("child_process");
+    console.log(`[secure-exec] Building widget ${widgetId}...`);
+    await execAsync(`npx vite build --outDir "${distDir}"`, { cwd: sandboxDir, timeout: 60_000 });
+    console.log(`[secure-exec] Widget ${widgetId} built`);
 
-      const widgetDir = ${JSON.stringify(widgetDir)};
-      const distDir = ${JSON.stringify(distDir)};
-
-      try {
-        execSync("npm install", { cwd: widgetDir, stdio: "pipe" });
-        ${depsInstallCode}
-        execSync("npx vite build --outDir " + distDir, { cwd: widgetDir, stdio: "pipe" });
-        console.log("BUILD_SUCCESS");
-      } catch (err) {
-        console.error("BUILD_FAILED: " + (err.stderr ? err.stderr.toString() : err.message));
-        process.exitCode = 1;
-      }
-    `;
-
-    const logs: string[] = [];
-    const buildResult = await runtime.exec(buildScript, {
-      onStdio: (event) => {
-        logs.push(`[${event.channel}] ${event.message}`);
-      },
+    const runtime = new NodeRuntime({
+      systemDriver: createNodeDriver({
+        filesystem: new NodeFileSystem(),
+        useDefaultNetwork: true,
+        commandExecutor,
+        permissions: { ...allowAllFs, ...allowAllNetwork, ...allowAllChildProcess },
+        processConfig: { cwd: sandboxDir },
+      }),
+      runtimeDriverFactory: createNodeRuntimeDriverFactory(),
+      memoryLimit: 64,
+      cpuTimeLimitMs: 86_400_000,
     });
 
-    if (buildResult.code !== 0 || !logs.some(l => l.includes("BUILD_SUCCESS"))) {
-      console.error(`[secure-exec] Build failed for ${widgetId}:`, logs.join("\n"));
-      widgetStatuses.set(widgetId, { status: "error", port });
-      runtime.dispose();
-      return;
-    }
+    startFileServer(runtime, distDir, port);
+    await waitForServer(`http://127.0.0.1:${port}/`);
 
-    await ensureDir(filesystem, distDir);
-
-    const serverScript = `
-      (async () => {
-        const http = require("node:http");
-        const fs = require("node:fs");
-        const path = require("node:path");
-
-        const distDir = ${JSON.stringify(distDir)};
-        const port = ${port};
-        const host = "127.0.0.1";
-
-        const mimeTypes = {
-          ".html": "text/html; charset=utf-8",
-          ".js": "application/javascript; charset=utf-8",
-          ".mjs": "application/javascript; charset=utf-8",
-          ".css": "text/css; charset=utf-8",
-          ".json": "application/json; charset=utf-8",
-          ".png": "image/png",
-          ".jpg": "image/jpeg",
-          ".jpeg": "image/jpeg",
-          ".gif": "image/gif",
-          ".svg": "image/svg+xml",
-          ".ico": "image/x-icon",
-          ".woff": "font/woff",
-          ".woff2": "font/woff2",
-          ".ttf": "font/ttf",
-          ".eot": "font/eot",
-        };
-
-        function getMime(filePath) {
-          const ext = path.extname(filePath).toLowerCase();
-          return mimeTypes[ext] || "application/octet-stream";
-        }
-
-        const server = http.createServer((req, res) => {
-          let urlPath = new URL(req.url, "http://localhost").pathname;
-          if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
-
-          const filePath = path.join(distDir, urlPath);
-
-          try {
-            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-              const content = fs.readFileSync(filePath);
-              res.writeHead(200, {
-                "Content-Type": getMime(filePath),
-                "Cache-Control": "no-store",
-              });
-              res.end(content);
-            } else {
-              const indexPath = path.join(distDir, "index.html");
-              if (fs.existsSync(indexPath)) {
-                const content = fs.readFileSync(indexPath);
-                res.writeHead(200, {
-                  "Content-Type": "text/html; charset=utf-8",
-                  "Cache-Control": "no-store",
-                });
-                res.end(content);
-              } else {
-                res.writeHead(404);
-                res.end("Not Found");
-              }
-            }
-          } catch (err) {
-            res.writeHead(500);
-            res.end("Internal Server Error");
-          }
-        });
-
-        await new Promise((resolve, reject) => {
-          server.once("error", reject);
-          server.listen(port, host, resolve);
-        });
-
-        console.log("SERVER_LISTENING:" + port);
-        await new Promise(() => {});
-      })().catch((error) => {
-        console.error("SERVER_ERROR:", error.message || error);
-        process.exitCode = 1;
-      });
-    `;
-
-    const execPromise = runtime.exec(serverScript, {
-      onStdio: (event) => {
-        if (event.message.includes("SERVER_LISTENING")) {
-          console.log(`[secure-exec] Widget ${widgetId} server listening on port ${port}`);
-        }
-      },
-    });
-
-    await waitForServer(runtime, `http://127.0.0.1:${port}/`, 15000);
-
-    widgetRuntimes.set(widgetId, { runtime, port, execPromise });
+    widgetSandboxes.set(widgetId, { runtime, port, sandboxDir });
     widgetStatuses.set(widgetId, { status: "ready", port });
-    console.log(`[secure-exec] Widget ${widgetId} built and serving on port ${port}`);
+    console.log(`[secure-exec] Widget ${widgetId} serving on port ${port}`);
   } catch (err) {
     console.error(`[secure-exec] Build error for ${widgetId}:`, err);
     widgetStatuses.set(widgetId, { status: "error", port });
   }
-}
-
-async function waitForServer(
-  runtime: NodeRuntime,
-  url: string,
-  timeout = 15000,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await runtime.network.fetch(url, { method: "GET" });
-      if (response.status === 200 || response.status === 404) {
-        return;
-      }
-    } catch {
-      // Server not ready yet
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`Timed out waiting for server at ${url}`);
 }
 
 // ── Public API ──
@@ -587,40 +373,23 @@ async function waitForServer(
 export async function buildWidget(widgetId: string): Promise<void> {
   const existing = buildLocks.get(widgetId);
   if (existing) await existing;
-
   const promise = doBuild(widgetId);
   buildLocks.set(widgetId, promise);
-  try {
-    await promise;
-  } finally {
-    buildLocks.delete(widgetId);
-  }
+  try { await promise; } finally { buildLocks.delete(widgetId); }
 }
 
 const BUILD_TIMEOUT_MS = 120_000;
 
 export async function ensureWidget(widgetId: string): Promise<WidgetStatus> {
   const existing = widgetStatuses.get(widgetId);
-  if (existing && existing.status === "ready") {
-    const wr = widgetRuntimes.get(widgetId);
-    if (wr) return existing;
-  }
-
-  const isStaleBuilding =
-    existing?.status === "building" &&
-    existing.startedAt &&
-    Date.now() - existing.startedAt > BUILD_TIMEOUT_MS;
-
-  if (existing?.status === "building" && !isStaleBuilding) {
-    return existing;
-  }
+  if (existing?.status === "ready" && widgetSandboxes.has(widgetId)) return existing;
+  const isStale = existing?.status === "building" && existing.startedAt && Date.now() - existing.startedAt > BUILD_TIMEOUT_MS;
+  if (existing?.status === "building" && !isStale) return existing;
 
   const port = await getPort({ port: portNumbers(4100, 4999) });
   const status: WidgetStatus = { status: "building", port, startedAt: Date.now() };
   widgetStatuses.set(widgetId, status);
-  buildWidget(widgetId).catch((err) => {
-    console.error(`[secure-exec] Background build failed for ${widgetId}:`, err);
-  });
+  buildWidget(widgetId).catch((err) => console.error(`[secure-exec] Background build failed for ${widgetId}:`, err));
   return status;
 }
 
@@ -628,25 +397,17 @@ export async function rebuildWidget(widgetId: string): Promise<WidgetStatus> {
   const port = await getPort({ port: portNumbers(4100, 4999) });
   const status: WidgetStatus = { status: "building", port };
   widgetStatuses.set(widgetId, status);
-
-  buildWidget(widgetId).catch((err) => {
-    console.error(`[secure-exec] Rebuild failed for ${widgetId}:`, err);
-  });
-
+  buildWidget(widgetId).catch((err) => console.error(`[secure-exec] Rebuild failed for ${widgetId}:`, err));
   return status;
 }
 
 export async function stopWidget(widgetId: string): Promise<void> {
   widgetStatuses.delete(widgetId);
-  const wr = widgetRuntimes.get(widgetId);
-  if (wr) {
-    try {
-      await wr.runtime.terminate();
-      wr.runtime.dispose();
-    } catch {
-      // ignore
-    }
-    widgetRuntimes.delete(widgetId);
+  const sb = widgetSandboxes.get(widgetId);
+  if (sb) {
+    try { await sb.runtime.terminate(); sb.runtime.dispose(); } catch { /* */ }
+    try { rmSync(sb.sandboxDir, { recursive: true, force: true }); } catch { /* */ }
+    widgetSandboxes.delete(widgetId);
   }
 }
 
@@ -654,31 +415,20 @@ export function getWidgetStatus(widgetId: string): WidgetStatus | null {
   return widgetStatuses.get(widgetId) ?? null;
 }
 
-export function getWidgetRuntime(widgetId: string): WidgetRuntime | null {
-  return widgetRuntimes.get(widgetId) ?? null;
-}
-
 export async function fetchFromWidget(
   widgetId: string,
   path: string,
   headers?: Record<string, string>,
 ): Promise<{ status: number; body: string; contentType: string } | null> {
-  const wr = widgetRuntimes.get(widgetId);
-  if (!wr) return null;
-
+  const sb = widgetSandboxes.get(widgetId);
+  if (!sb) return null;
   try {
-    const url = `http://127.0.0.1:${wr.port}/${path}`;
-    const response = await wr.runtime.network.fetch(url, {
-      method: "GET",
-      headers,
+    const url = `http://127.0.0.1:${sb.port}/${path}`;
+    const r = await fetch(url, {
+      headers: headers ?? {},
+      signal: AbortSignal.timeout(10000),
     });
-
-    return {
-      status: response.status,
-      body: response.body,
-      contentType: response.headers?.["content-type"] ?? "text/html",
-    };
-  } catch {
-    return null;
-  }
+    const body = await r.text();
+    return { status: r.status, body, contentType: r.headers.get("content-type") ?? "text/html" };
+  } catch { return null; }
 }
