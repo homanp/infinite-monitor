@@ -23,7 +23,7 @@ Each widget is a full React app — with its own dependencies, API calls, charts
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22+ (needed for Secure Exec’s `isolated-vm` native addon)
 - An API key from any [supported provider](#supported-providers) (Anthropic, OpenAI, Google, xAI, Mistral, and more)
 
 ### Setup

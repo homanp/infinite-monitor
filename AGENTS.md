@@ -8,7 +8,7 @@ Infinite Monitor is a single Next.js 16 application (not a monorepo) that builds
 
 ### Prerequisites
 
-- **Node.js 20+** with **npm** (lockfile: `package-lock.json`)
+- **Node.js 22+** with **npm** (lockfile: `package-lock.json`) — required for native deps (`isolated-vm` / Secure Exec)
 - No Docker required — widget sandboxing is handled by `secure-exec` (V8 isolates)
 
 ### Key commands
