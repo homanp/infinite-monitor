@@ -2,6 +2,7 @@ import { streamText, stepCountIs, tool } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { z } from "zod";
 import { createModel, isAnthropicModel } from "@/lib/create-model";
+import type { CustomApiConfig } from "@/store/settings-store";
 import { Bash } from "just-bash";
 import { createBashTool } from "bash-tool";
 import {
@@ -25,6 +26,16 @@ interface McpServerPayload {
   args?: string[];
   headers?: Record<string, string>;
   env?: Record<string, string>;
+}
+
+interface CustomApiPayload {
+  id: string;
+  name: string;
+  endpoint: string;
+  type: "anthropic" | "openai";
+  apiKey?: string;
+  models: Array<{ id: string; name: string }>;
+  enabled: boolean;
 }
 
 const SYSTEM_PROMPT = `You are a coding agent that builds React widget components.
@@ -138,6 +149,7 @@ export async function POST(request: Request) {
     searchProvider,
     searchApiKey,
     mcpServers: mcpServerConfigs,
+    customApi,
   } = body as {
     messages: Array<{
       role: "user" | "assistant";
@@ -149,6 +161,7 @@ export async function POST(request: Request) {
     searchProvider?: SearchProvider;
     searchApiKey?: string;
     mcpServers?: McpServerPayload[];
+    customApi?: CustomApiPayload;
   };
 
   if (!widgetId) {
@@ -157,6 +170,19 @@ export async function POST(request: Request) {
 
   const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
   const useAnthropic = isAnthropicModel(selectedModel);
+
+  // Prepare custom API config if using a custom provider
+  const customConfig: CustomApiConfig | undefined = customApi
+    ? {
+        id: customApi.id,
+        name: customApi.name,
+        endpoint: customApi.endpoint,
+        type: customApi.type,
+        apiKey: customApi.apiKey,
+        models: customApi.models,
+        enabled: customApi.enabled,
+      }
+    : undefined;
 
   const SANDBOX_ROOT = "/widget";
 
@@ -305,7 +331,7 @@ export async function POST(request: Request) {
   }
 
   const result = streamText({
-    model: createModel(selectedModel, apiKey),
+    model: createModel(selectedModel, apiKey, customConfig),
     system: SYSTEM_PROMPT,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     messages: messages as any,

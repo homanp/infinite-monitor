@@ -191,12 +191,41 @@ export const ALL_MODELS = PROVIDERS.flatMap((p) => p.models);
 
 export const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
 
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+
+export function createCustomProviderInfo(config: import("@/store/settings-store").CustomApiConfig): ProviderInfo {
+  return {
+    id: `${CUSTOM_PROVIDER_PREFIX}${config.id}`,
+    name: config.name,
+    envKey: "",
+    models: config.models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      providerId: `${CUSTOM_PROVIDER_PREFIX}${config.id}`,
+      providerName: config.name,
+    })),
+  };
+}
+
 export function findProvider(providerId: string): ProviderInfo | undefined {
   return PROVIDERS.find((p) => p.id === providerId);
 }
 
 export function parseModelString(modelStr: string): { providerId: string; modelId: string } {
+  if (modelStr.startsWith(CUSTOM_PROVIDER_PREFIX)) {
+    const rest = modelStr.slice(CUSTOM_PROVIDER_PREFIX.length);
+    const idx = rest.indexOf(":");
+    if (idx === -1) return { providerId: modelStr, modelId: "" };
+    return {
+      providerId: CUSTOM_PROVIDER_PREFIX + rest.slice(0, idx),
+      modelId: rest.slice(idx + 1),
+    };
+  }
   const idx = modelStr.indexOf(":");
   if (idx === -1) return { providerId: "anthropic", modelId: modelStr };
   return { providerId: modelStr.slice(0, idx), modelId: modelStr.slice(idx + 1) };
+}
+
+export function isCustomProvider(providerId: string): boolean {
+  return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
 }

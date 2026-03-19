@@ -7,7 +7,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import { MessageSquareDashed, Pencil, X, Cable } from "lucide-react";
+import { MessageSquareDashed, Pencil, X, Cable, Server, Plus, Trash2 } from "lucide-react";
 import { nanoid } from "nanoid";
 import {
   Conversation,
@@ -43,9 +43,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useWidgetStore, type WidgetMessage, type MessageAttachment } from "@/store/widget-store";
 import { useSettingsStore } from "@/store/settings-store";
-import { PROVIDERS, parseModelString, findProvider } from "@/lib/model-registry";
 import { SearchProviderPicker } from "@/components/search-provider-picker";
 import { McpConfigDialog } from "@/components/mcp-config-dialog";
+import { CustomApiDialog } from "@/components/custom-api-dialog";
+import {
+  PROVIDERS,
+  parseModelString,
+  createCustomProviderInfo,
+  isCustomProvider,
+  CUSTOM_PROVIDER_PREFIX,
+} from "@/lib/model-registry";
+import { Switch } from "@/components/ui/switch";
 
 interface PendingFile {
   id: string;
@@ -212,6 +220,7 @@ async function streamToWidget(
   messages: Array<{ role: "user" | "assistant"; content: string | Record<string, unknown>[] }>,
   model?: string,
   apiKey?: string,
+  customApi?: { id: string; name: string; endpoint: string; type: "anthropic" | "openai"; apiKey?: string; models: Array<{ id: string; name: string }>; enabled: boolean },
 ) {
   const {
     addMessage,
@@ -268,6 +277,7 @@ async function streamToWidget(
         apiKey,
         ...(searchProvider && searchApiKey ? { searchProvider, searchApiKey } : {}),
         ...(enabledMcpServers.length > 0 ? { mcpServers: enabledMcpServers } : {}),
+        ...(customApi ? { customApi } : {}),
       }),
       signal: controller.signal,
     });
@@ -385,20 +395,37 @@ function useModelSelector() {
   const setModel = useSettingsStore((s) => s.setModel);
   const apiKeys = useSettingsStore((s) => s.apiKeys);
   const setApiKey = useSettingsStore((s) => s.setApiKey);
+  const customApis = useSettingsStore((s) => s.customApis);
+  const toggleCustomApi = useSettingsStore((s) => s.toggleCustomApi);
+  const removeCustomApi = useSettingsStore((s) => s.removeCustomApi);
   const [open, setOpen] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [customApiOpen, setCustomApiOpen] = useState(false);
 
   const { providerId, modelId } = parseModelString(selectedModel);
-  const provider = findProvider(providerId);
+
+  const allProviders = useMemo(() => {
+    const customProviders = customApis
+      .filter((c) => c.enabled)
+      .map((c) => createCustomProviderInfo(c));
+    return [...PROVIDERS, ...customProviders];
+  }, [customApis]);
+
+  const provider = allProviders.find((p) => p.id === providerId);
   const model = provider?.models.find((m) => m.id === modelId);
-  const hasKey = !!apiKeys[providerId];
+
+  const hasKey = isCustomProvider(providerId)
+    ? !!customApis.find((c) => `${CUSTOM_PROVIDER_PREFIX}${c.id}` === providerId)?.apiKey
+    : !!apiKeys[providerId];
 
   const handleSelect = (newModel: string) => {
     setModel(newModel);
     setOpen(false);
     const { providerId: pid } = parseModelString(newModel);
-    if (!apiKeys[pid]) {
+    if (isCustomProvider(pid)) {
+      setShowKeyInput(false);
+    } else if (!apiKeys[pid]) {
       setShowKeyInput(true);
     } else {
       setShowKeyInput(false);
@@ -413,38 +440,91 @@ function useModelSelector() {
     }
   };
 
+  const handleAddCustomApi = () => {
+    setOpen(false);
+    setCustomApiOpen(true);
+  };
+
   const trigger = (
-    <ModelSelector open={open} onOpenChange={setOpen}>
-      <ModelSelectorTrigger className="inline-flex h-7 items-center gap-1.5 px-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer">
-        <ModelSelectorLogo provider={providerId as "anthropic"} className="size-3.5" />
-        <span>{model?.name ?? modelId}</span>
-        {!hasKey && <span className="size-1.5 rounded-full bg-yellow-500/70 shrink-0" />}
-      </ModelSelectorTrigger>
-      <ModelSelectorContent>
-        <ModelSelectorInput placeholder="Search models..." />
-        <ModelSelectorList>
-          <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-          {PROVIDERS.map((p) => (
-            <ModelSelectorGroup key={p.id} heading={p.name}>
-              {p.models.map((m) => (
-                <ModelSelectorItem
-                  key={`${p.id}:${m.id}`}
-                  value={`${p.id}:${m.id} ${m.name} ${p.name}`}
-                  onSelect={() => handleSelect(`${p.id}:${m.id}`)}
-                  className="flex items-center gap-2"
-                >
-                  <ModelSelectorLogo provider={p.id as "anthropic"} />
-                  <ModelSelectorName>{m.name}</ModelSelectorName>
-                </ModelSelectorItem>
-              ))}
+    <>
+      <ModelSelector open={open} onOpenChange={setOpen}>
+        <ModelSelectorTrigger className="inline-flex h-7 items-center gap-1.5 px-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer">
+          {isCustomProvider(providerId) ? (
+            <Server className="size-3.5 text-zinc-400" />
+          ) : (
+            <ModelSelectorLogo provider={providerId as "anthropic"} className="size-3.5" />
+          )}
+          <span>{model?.name ?? modelId}</span>
+          {!hasKey && !isCustomProvider(providerId) && (
+            <span className="size-1.5 rounded-full bg-yellow-500/70 shrink-0" />
+          )}
+        </ModelSelectorTrigger>
+        <ModelSelectorContent>
+          <ModelSelectorInput placeholder="Search models..." />
+          <ModelSelectorList>
+            <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
+            {allProviders.map((p) => (
+              <ModelSelectorGroup key={p.id} heading={p.name}>
+                {p.models.map((m) => (
+                  <ModelSelectorItem
+                    key={`${p.id}:${m.id}`}
+                    value={`${p.id}:${m.id} ${m.name} ${p.name}`}
+                    onSelect={() => handleSelect(`${p.id}:${m.id}`)}
+                    className="flex items-center gap-2"
+                  >
+                    {isCustomProvider(p.id) ? (
+                      <Server className="size-3 text-zinc-400" />
+                    ) : (
+                      <ModelSelectorLogo provider={p.id as "anthropic"} />
+                    )}
+                    <ModelSelectorName>{m.name}</ModelSelectorName>
+                  </ModelSelectorItem>
+                ))}
+              </ModelSelectorGroup>
+            ))}
+            {customApis.length > 0 && (
+              <ModelSelectorGroup heading="Manage Custom APIs">
+                {customApis.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-2 px-2 py-1.5 text-xs"
+                  >
+                    <Server className="size-3 text-zinc-500 shrink-0" />
+                    <span className="flex-1 min-w-0 truncate text-zinc-300">{c.name}</span>
+                    <Switch
+                      checked={c.enabled}
+                      onCheckedChange={() => toggleCustomApi(c.id)}
+                      className="scale-75"
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeCustomApi(c.id); }}
+                      className="text-zinc-600 hover:text-red-400 transition-colors p-0.5"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </ModelSelectorGroup>
+            )}
+            <ModelSelectorGroup heading="">
+              <ModelSelectorItem
+                value="__add_custom_api__"
+                onSelect={handleAddCustomApi}
+                className="flex items-center gap-2 text-zinc-400"
+              >
+                <Plus className="size-3" />
+                <ModelSelectorName>Add Custom API</ModelSelectorName>
+              </ModelSelectorItem>
             </ModelSelectorGroup>
-          ))}
-        </ModelSelectorList>
-      </ModelSelectorContent>
-    </ModelSelector>
+          </ModelSelectorList>
+        </ModelSelectorContent>
+      </ModelSelector>
+      <CustomApiDialog open={customApiOpen} onOpenChange={setCustomApiOpen} />
+    </>
   );
 
-  const keyInputEl = (showKeyInput || !hasKey) ? (
+  const keyInputEl = !isCustomProvider(providerId) && (showKeyInput || !hasKey) ? (
     <div className="flex items-center gap-1.5">
       <input
         type="password"
@@ -668,9 +748,21 @@ export function ChatSidebar() {
       attachments,
     });
 
-    const { selectedModel, apiKeys } = useSettingsStore.getState();
+    const { selectedModel, apiKeys, customApis } = useSettingsStore.getState();
     const { providerId } = parseModelString(selectedModel);
     const byokKey = apiKeys[providerId];
+
+    // Get custom API config if using a custom provider
+    // For custom providers, the model string is "custom:api-id:model-id"
+    // We need to extract the api-id from the full model string
+    const customApiConfig = selectedModel.startsWith(CUSTOM_PROVIDER_PREFIX)
+      ? (() => {
+          const afterPrefix = selectedModel.slice(CUSTOM_PROVIDER_PREFIX.length);
+          const colonIdx = afterPrefix.indexOf(":");
+          const customApiId = colonIdx === -1 ? afterPrefix : afterPrefix.slice(0, colonIdx);
+          return customApis.find((c) => c.id === customApiId);
+        })()
+      : undefined;
 
     if (isFirstUserMessage && userContent) {
       fetch("/api/generate-title", {
@@ -685,7 +777,7 @@ export function ChatSidebar() {
         .catch(() => {});
     }
 
-    streamToWidget(widgetId, messagesForApi, selectedModel, byokKey);
+    streamToWidget(widgetId, messagesForApi, selectedModel, byokKey, customApiConfig);
   }
 
   return (
