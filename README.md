@@ -114,6 +114,17 @@ Supports 15 AI providers including Anthropic, OpenAI, Google, xAI, Mistral, Deep
 
 **Brin threat scanning** — Every external URL is scanned through [Brin](https://brin.sh) ([GitHub](https://github.com/superagent-ai/brin)) for threats. Web search results and CORS proxy requests with a threat score below 30 are blocked.
 
+## Deploying with Railway (GitHub Actions)
+
+The [deploy workflow](.github/workflows/deploy.yml) runs `railway up` using the [Railway CLI](https://docs.railway.com/guides/cli). Configure these **repository secrets**:
+
+| Secret | Value |
+|--------|--------|
+| `RAILWAY_TOKEN` | A **[project token](https://docs.railway.com/integrations/api#project-token)** from **Project → Project settings → Tokens** (scoped to the environment you deploy to). Not the same as an account or workspace token from [Account → Tokens](https://railway.com/account/tokens). |
+| `RAILWAY_SERVICE_ID` | The target service’s ID (⌘/Ctrl+K in the Railway dashboard → copy **Service ID**), or the service name if the CLI accepts it for your project. |
+
+Paste the token once with **no quotes** and **no leading/trailing whitespace**. If the CLI reports `Invalid RAILWAY_TOKEN`, rotate the project token in Railway, update the secret, and re-run the workflow.
+
 ## Contributing
 
 Contributions are welcome. Some areas that need work:
