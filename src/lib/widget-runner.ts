@@ -1,4 +1,15 @@
-import Docker from "dockerode";
+import {
+  NodeRuntime,
+  createNodeDriver,
+  createNodeRuntimeDriverFactory,
+  createInMemoryFileSystem,
+  allowAllFs,
+  allowAllNetwork,
+  allowAllChildProcess,
+  type CommandExecutor,
+  type VirtualFileSystem,
+} from "secure-exec";
+import { spawn } from "node:child_process";
 import getPort, { portNumbers } from "get-port";
 import {
   getWidgetFiles,
@@ -6,11 +17,6 @@ import {
   getWidget,
   upsertWidget,
 } from "@/db/widgets";
-
-const docker = new Docker();
-
-const IMAGE_NAME = "widget-base:latest";
-const CONTAINER_NAME = "widget-runtime";
 
 // ── Types ──
 
@@ -20,122 +26,202 @@ interface WidgetStatus {
   startedAt?: number;
 }
 
-// ── Singleton runtime container ──
-
-let runtimePort: number | null = null;
-let runtimeContainerId: string | null = null;
-let runtimeStarting: Promise<number> | null = null;
-
-const DIST_VOLUME = "widget-dist";
-
-async function ensureVolume(): Promise<void> {
-  try {
-    await docker.getVolume(DIST_VOLUME).inspect();
-  } catch {
-    await docker.createVolume({ Name: DIST_VOLUME });
-  }
+interface WidgetRuntime {
+  runtime: NodeRuntime;
+  port: number;
+  execPromise?: Promise<unknown>;
 }
 
-async function ensureRuntime(): Promise<number> {
-  if (runtimePort && runtimeContainerId) {
-    try {
-      const c = docker.getContainer(runtimeContainerId);
-      const info = await c.inspect();
-      if (info.State.Running) return runtimePort;
-    } catch {
-      // Inspect failed — try to reattach by name before recreating
-    }
-    runtimePort = null;
-    runtimeContainerId = null;
-  }
+// ── Per-widget SecureExec runtimes ──
 
-  // Try to reattach to an existing container by name
-  try {
-    const existing = docker.getContainer(CONTAINER_NAME);
-    const info = await existing.inspect();
-    if (info.State.Running) {
-      const hostPort = info.NetworkSettings?.Ports?.["3000/tcp"]?.[0]?.HostPort;
-      if (hostPort) {
-        runtimeContainerId = info.Id;
-        runtimePort = parseInt(hostPort, 10);
-        return runtimePort;
-      }
-    } else {
-      await existing.remove({ force: true }).catch(() => {});
-    }
-  } catch {
-    // Container doesn't exist
-  }
+const widgetRuntimes = new Map<string, WidgetRuntime>();
+const widgetStatuses = new Map<string, WidgetStatus>();
+const buildLocks = new Map<string, Promise<void>>();
 
-  if (runtimeStarting) return runtimeStarting;
+const commandExecutor: CommandExecutor = {
+  spawn(command, args, options) {
+    const resolvedCommand = command === "node" ? process.execPath : command;
+    const child = spawn(resolvedCommand, args, {
+      cwd: options.cwd ?? undefined,
+      env: options.env as NodeJS.ProcessEnv | undefined,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
 
-  runtimeStarting = (async () => {
-    await ensureVolume();
+    child.stdout!.on("data", (chunk: Buffer) => {
+      options.onStdout?.(new Uint8Array(chunk));
+    });
+    child.stderr!.on("data", (chunk: Buffer) => {
+      options.onStderr?.(new Uint8Array(chunk));
+    });
 
-    const port = await getPort({ port: portNumbers(3100, 3999) });
-
-    const container = await docker.createContainer({
-      Image: IMAGE_NAME,
-      name: CONTAINER_NAME,
-      ExposedPorts: { "3000/tcp": {} },
-      HostConfig: {
-        PortBindings: {
-          "3000/tcp": [{ HostPort: String(port) }],
-        },
-        Binds: [`${DIST_VOLUME}:/app/dist`],
+    return {
+      writeStdin(data: Uint8Array | string) {
+        child.stdin!.write(data);
       },
-    });
+      closeStdin() {
+        child.stdin!.end();
+      },
+      kill(signal?: number) {
+        child.kill(signal);
+      },
+      wait() {
+        return new Promise<number>((resolve) => {
+          child.once("close", (code: number | null) => resolve(code ?? 1));
+        });
+      },
+    };
+  },
+};
 
-    await container.start();
-    runtimeContainerId = container.id;
-    runtimePort = port;
+// ── Template files (embedded from docker/widget-base/template) ──
 
-    await waitForReady(port, 30000);
-    console.log(`[widget-runtime] Container started on port ${port}`);
+const TEMPLATE_INDEX_HTML = `<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Widget</title>
+  </head>
+  <body style="margin:0; background:transparent;">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`;
 
-    runtimeStarting = null;
-    return port;
-  })();
+const TEMPLATE_MAIN_TSX = `import React from "react";
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import App from "./App";
 
-  try {
-    return await runtimeStarting;
-  } catch (err) {
-    runtimeStarting = null;
-    throw err;
-  }
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`;
+
+const TEMPLATE_INDEX_CSS = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  overflow: hidden;
+  background: transparent;
+  color: #f4f4f5;
 }
 
-// ── Exec helper ──
+#root { width: 100%; height: 100%; }
 
-async function execInRuntime(cmd: string): Promise<{ exitCode: number; output: string }> {
-  await ensureRuntime();
-  const container = docker.getContainer(runtimeContainerId!);
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #525252; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #737373; }
+* { scrollbar-width: thin; scrollbar-color: #525252 transparent; }`;
 
-  const exec = await container.exec({
-    Cmd: ["sh", "-c", cmd],
-    AttachStdout: true,
-    AttachStderr: true,
-  });
+const TEMPLATE_UTILS_TS = `import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
-  return new Promise((resolve, reject) => {
-    exec.start({ hijack: true, stdin: false }, (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
-      if (err) return reject(err);
-      if (!stream) return reject(new Error("No stream from exec"));
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}`;
 
-      const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      stream.on("end", () => {
-        exec.inspect().then((info) => {
-          resolve({
-            exitCode: info.ExitCode ?? 0,
-            output: Buffer.concat(chunks).toString("utf-8"),
-          });
-        }).catch(reject);
-      });
-      stream.on("error", reject);
-    });
-  });
-}
+const TEMPLATE_VITE_CONFIG = `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react()],
+  base: "./",
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    hmr: false,
+  },
+});`;
+
+const TEMPLATE_TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "ES2020",
+    useDefineForClassFields: true,
+    lib: ["ES2020", "DOM", "DOM.Iterable"],
+    module: "ESNext",
+    skipLibCheck: true,
+    moduleResolution: "bundler",
+    allowImportingTsExtensions: true,
+    resolveJsonModule: true,
+    isolatedModules: true,
+    noEmit: true,
+    jsx: "react-jsx",
+    strict: true,
+    noUnusedLocals: false,
+    noUnusedParameters: false,
+    noFallthroughCasesInSwitch: true,
+    paths: { "@/*": ["./src/*"] },
+  },
+  include: ["src"],
+}, null, 2);
+
+const TEMPLATE_POSTCSS_CONFIG = `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};`;
+
+const TEMPLATE_TAILWIND_CONFIG = `/** @type {import('tailwindcss').Config} */
+export default {
+  darkMode: "class",
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};`;
+
+const TEMPLATE_PACKAGE_JSON = JSON.stringify({
+  name: "widget",
+  private: true,
+  version: "0.0.1",
+  type: "module",
+  scripts: {
+    dev: "vite --host 0.0.0.0 --port 3000",
+    build: "vite build",
+    preview: "vite preview --host 0.0.0.0 --port 3000",
+  },
+  dependencies: {
+    react: "^18.3.1",
+    "react-dom": "^18.3.1",
+    "class-variance-authority": "^0.7.1",
+    clsx: "^2.1.1",
+    "tailwind-merge": "^2.5.2",
+    "lucide-react": "^0.400.0",
+    recharts: "^2.15.0",
+    "date-fns": "^4.1.0",
+    "maplibre-gl": "^4.7.0",
+    "framer-motion": "^11.0.0",
+    "@tanstack/react-query": "^5.0.0",
+  },
+  devDependencies: {
+    "@vitejs/plugin-react": "^4.3.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "tailwindcss": "^3.4.1",
+    autoprefixer: "^10.4.20",
+    postcss: "^8.4.40",
+    typescript: "^5.5.3",
+    vite: "^5.4.1",
+  },
+}, null, 2);
 
 // ── Security ──
 
@@ -231,110 +317,269 @@ export async function addWidgetDependencies(
   return merged;
 }
 
-// ── Build mutex ──
+// ── SecureExec runtime management ──
 
-const buildLocks = new Map<string, Promise<void>>();
-const widgetStatuses = new Map<string, WidgetStatus>();
+function createWidgetRuntime(): {
+  runtime: NodeRuntime;
+  filesystem: VirtualFileSystem;
+} {
+  const filesystem = createInMemoryFileSystem();
+  const runtime = new NodeRuntime({
+    systemDriver: createNodeDriver({
+      filesystem,
+      useDefaultNetwork: true,
+      commandExecutor,
+      permissions: {
+        ...allowAllFs,
+        ...allowAllNetwork,
+        ...allowAllChildProcess,
+      },
+    }),
+    runtimeDriverFactory: createNodeRuntimeDriverFactory(),
+    memoryLimit: 256,
+    cpuTimeLimitMs: 120_000,
+  });
 
-// ── Build a widget inside the runtime container ──
+  return { runtime, filesystem };
+}
+
+async function ensureDir(filesystem: VirtualFileSystem, path: string): Promise<void> {
+  const parts = path.split("/").filter(Boolean);
+  let current = "";
+  for (const part of parts) {
+    current += "/" + part;
+    const exists = await filesystem.exists(current);
+    if (!exists) {
+      await filesystem.mkdir(current);
+    }
+  }
+}
+
+async function writeTemplateFiles(
+  filesystem: VirtualFileSystem,
+  widgetId: string,
+  files: Record<string, string>,
+): Promise<void> {
+  const widgetDir = `/app/widgets/${widgetId}`;
+
+  await ensureDir(filesystem, widgetDir);
+  await ensureDir(filesystem, `${widgetDir}/src`);
+  await ensureDir(filesystem, `${widgetDir}/src/lib`);
+  await ensureDir(filesystem, `${widgetDir}/src/components`);
+
+  await filesystem.writeFile(`${widgetDir}/index.html`, TEMPLATE_INDEX_HTML);
+  await filesystem.writeFile(`${widgetDir}/src/main.tsx`, TEMPLATE_MAIN_TSX);
+  await filesystem.writeFile(`${widgetDir}/src/index.css`, TEMPLATE_INDEX_CSS);
+  await filesystem.writeFile(`${widgetDir}/src/lib/utils.ts`, TEMPLATE_UTILS_TS);
+  await filesystem.writeFile(`${widgetDir}/vite.config.ts`, TEMPLATE_VITE_CONFIG);
+  await filesystem.writeFile(`${widgetDir}/tsconfig.json`, TEMPLATE_TSCONFIG);
+  await filesystem.writeFile(`${widgetDir}/postcss.config.js`, TEMPLATE_POSTCSS_CONFIG);
+  await filesystem.writeFile(`${widgetDir}/tailwind.config.ts`, TEMPLATE_TAILWIND_CONFIG);
+  await filesystem.writeFile(`${widgetDir}/package.json`, TEMPLATE_PACKAGE_JSON);
+
+  for (const [path, content] of Object.entries(files)) {
+    if (path === "deps.json") continue;
+    if (path.includes("/")) {
+      const dir = `${widgetDir}/${path.substring(0, path.lastIndexOf("/"))}`;
+      await ensureDir(filesystem, dir);
+    }
+    await filesystem.writeFile(`${widgetDir}/${path}`, content);
+  }
+}
 
 async function doBuild(widgetId: string): Promise<void> {
-  const port = await ensureRuntime();
-  const container = docker.getContainer(runtimeContainerId!);
+  const port = await getPort({ port: portNumbers(4100, 4999) });
 
-  widgetStatuses.set(widgetId, { status: "building", port });
+  widgetStatuses.set(widgetId, { status: "building", port, startedAt: Date.now() });
 
   try {
     const files = getWidgetFiles(widgetId);
     if (!files["src/App.tsx"]) {
       widgetStatuses.set(widgetId, { status: "error", port });
-      console.error(`[widget-runtime] No src/App.tsx for ${widgetId}`);
+      console.error(`[secure-exec] No src/App.tsx for ${widgetId}`);
       return;
     }
 
-    // Inject files via tar archive
-    const tarStream = createTarFromFiles(widgetId, files);
-    await container.putArchive(tarStream, { path: "/app/widgets/" });
+    const existing = widgetRuntimes.get(widgetId);
+    if (existing) {
+      try {
+        await existing.runtime.terminate();
+        existing.runtime.dispose();
+      } catch {
+        // ignore
+      }
+      widgetRuntimes.delete(widgetId);
+    }
 
-    // Set up workspace and build
-    const depsInstall = files["deps.json"]
-      ? `cd /app/widgets/${widgetId} && npm install --no-save $(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('deps.json','utf8')).join(' '))") 2>/dev/null || true`
-      : "true";
+    const { runtime, filesystem } = createWidgetRuntime();
+    await writeTemplateFiles(filesystem, widgetId, files);
 
-    const buildCmd = [
-      `mkdir -p /app/widgets/${widgetId}/src /app/dist/${widgetId}`,
-      `cp /base/vite.config.ts /base/tsconfig.json /base/postcss.config.js /base/tailwind.config.ts /base/index.html /base/package.json /app/widgets/${widgetId}/`,
-      `ln -sf /base/node_modules /app/widgets/${widgetId}/node_modules`,
-      `test -d /base/src/components && cp -r /base/src/components /app/widgets/${widgetId}/src/ || true`,
-      `test -d /base/src/lib && cp -r /base/src/lib /app/widgets/${widgetId}/src/ || true`,
-      `cp /base/src/index.css /app/widgets/${widgetId}/src/index.css`,
-      `cp /base/src/main.tsx /app/widgets/${widgetId}/src/main.tsx`,
-      depsInstall,
-      `cd /app/widgets/${widgetId} && npx vite build --outDir /app/dist/${widgetId} 2>&1`,
-    ].join(" && ");
+    const widgetDir = `/app/widgets/${widgetId}`;
+    const distDir = `/app/dist/${widgetId}`;
 
-    const result = await execInRuntime(buildCmd);
+    let depsInstallCode = "";
+    if (files["deps.json"]) {
+      try {
+        const deps: string[] = JSON.parse(files["deps.json"]);
+        if (deps.length > 0) {
+          depsInstallCode = `
+        execSync("npm install --no-save ${deps.join(" ")}", { cwd: widgetDir, stdio: "pipe" });`;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
-    if (result.exitCode !== 0) {
-      console.error(`[widget-runtime] Build failed for ${widgetId}:`, result.output);
+    const buildScript = `
+      const { execSync } = require("child_process");
+
+      const widgetDir = ${JSON.stringify(widgetDir)};
+      const distDir = ${JSON.stringify(distDir)};
+
+      try {
+        execSync("npm install", { cwd: widgetDir, stdio: "pipe" });
+        ${depsInstallCode}
+        execSync("npx vite build --outDir " + distDir, { cwd: widgetDir, stdio: "pipe" });
+        console.log("BUILD_SUCCESS");
+      } catch (err) {
+        console.error("BUILD_FAILED: " + (err.stderr ? err.stderr.toString() : err.message));
+        process.exitCode = 1;
+      }
+    `;
+
+    const logs: string[] = [];
+    const buildResult = await runtime.exec(buildScript, {
+      onStdio: (event) => {
+        logs.push(`[${event.channel}] ${event.message}`);
+      },
+    });
+
+    if (buildResult.code !== 0 || !logs.some(l => l.includes("BUILD_SUCCESS"))) {
+      console.error(`[secure-exec] Build failed for ${widgetId}:`, logs.join("\n"));
       widgetStatuses.set(widgetId, { status: "error", port });
+      runtime.dispose();
       return;
     }
 
-    console.log(`[widget-runtime] Widget ${widgetId} built successfully`);
+    await ensureDir(filesystem, distDir);
+
+    const serverScript = `
+      (async () => {
+        const http = require("node:http");
+        const fs = require("node:fs");
+        const path = require("node:path");
+
+        const distDir = ${JSON.stringify(distDir)};
+        const port = ${port};
+        const host = "127.0.0.1";
+
+        const mimeTypes = {
+          ".html": "text/html; charset=utf-8",
+          ".js": "application/javascript; charset=utf-8",
+          ".mjs": "application/javascript; charset=utf-8",
+          ".css": "text/css; charset=utf-8",
+          ".json": "application/json; charset=utf-8",
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".gif": "image/gif",
+          ".svg": "image/svg+xml",
+          ".ico": "image/x-icon",
+          ".woff": "font/woff",
+          ".woff2": "font/woff2",
+          ".ttf": "font/ttf",
+          ".eot": "font/eot",
+        };
+
+        function getMime(filePath) {
+          const ext = path.extname(filePath).toLowerCase();
+          return mimeTypes[ext] || "application/octet-stream";
+        }
+
+        const server = http.createServer((req, res) => {
+          let urlPath = new URL(req.url, "http://localhost").pathname;
+          if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
+
+          const filePath = path.join(distDir, urlPath);
+
+          try {
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+              const content = fs.readFileSync(filePath);
+              res.writeHead(200, {
+                "Content-Type": getMime(filePath),
+                "Cache-Control": "no-store",
+              });
+              res.end(content);
+            } else {
+              const indexPath = path.join(distDir, "index.html");
+              if (fs.existsSync(indexPath)) {
+                const content = fs.readFileSync(indexPath);
+                res.writeHead(200, {
+                  "Content-Type": "text/html; charset=utf-8",
+                  "Cache-Control": "no-store",
+                });
+                res.end(content);
+              } else {
+                res.writeHead(404);
+                res.end("Not Found");
+              }
+            }
+          } catch (err) {
+            res.writeHead(500);
+            res.end("Internal Server Error");
+          }
+        });
+
+        await new Promise((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(port, host, resolve);
+        });
+
+        console.log("SERVER_LISTENING:" + port);
+        await new Promise(() => {});
+      })().catch((error) => {
+        console.error("SERVER_ERROR:", error.message || error);
+        process.exitCode = 1;
+      });
+    `;
+
+    const execPromise = runtime.exec(serverScript, {
+      onStdio: (event) => {
+        if (event.message.includes("SERVER_LISTENING")) {
+          console.log(`[secure-exec] Widget ${widgetId} server listening on port ${port}`);
+        }
+      },
+    });
+
+    await waitForServer(runtime, `http://127.0.0.1:${port}/`, 15000);
+
+    widgetRuntimes.set(widgetId, { runtime, port, execPromise });
     widgetStatuses.set(widgetId, { status: "ready", port });
+    console.log(`[secure-exec] Widget ${widgetId} built and serving on port ${port}`);
   } catch (err) {
-    console.error(`[widget-runtime] Build error for ${widgetId}:`, err);
+    console.error(`[secure-exec] Build error for ${widgetId}:`, err);
     widgetStatuses.set(widgetId, { status: "error", port });
   }
 }
 
-function createTarFromFiles(widgetId: string, files: Record<string, string>): Buffer {
-  // Simple tar implementation without external deps
-  const entries: Buffer[] = [];
-
-  for (const [filePath, content] of Object.entries(files)) {
-    if (filePath === "deps.json") {
-      entries.push(createTarEntry(`${widgetId}/deps.json`, Buffer.from(content)));
-    } else {
-      entries.push(createTarEntry(`${widgetId}/${filePath}`, Buffer.from(content)));
+async function waitForServer(
+  runtime: NodeRuntime,
+  url: string,
+  timeout = 15000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const response = await runtime.network.fetch(url, { method: "GET" });
+      if (response.status === 200 || response.status === 404) {
+        return;
+      }
+    } catch {
+      // Server not ready yet
     }
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
-
-  // Two 512-byte zero blocks mark end of archive
-  entries.push(Buffer.alloc(1024));
-  return Buffer.concat(entries);
-}
-
-function createTarEntry(name: string, data: Buffer): Buffer {
-  const header = Buffer.alloc(512);
-  const nameBytes = Buffer.from(name, "utf-8");
-  nameBytes.copy(header, 0, 0, Math.min(nameBytes.length, 100));
-
-  // File mode
-  Buffer.from("0000644\0", "utf-8").copy(header, 100);
-  // Owner/group ID
-  Buffer.from("0001000\0", "utf-8").copy(header, 108);
-  Buffer.from("0001000\0", "utf-8").copy(header, 116);
-  // File size in octal
-  Buffer.from(data.length.toString(8).padStart(11, "0") + "\0", "utf-8").copy(header, 124);
-  // Modification time
-  Buffer.from(Math.floor(Date.now() / 1000).toString(8).padStart(11, "0") + "\0", "utf-8").copy(header, 136);
-  // Type flag: regular file
-  header[156] = 48; // '0'
-  // Magic
-  Buffer.from("ustar\0", "utf-8").copy(header, 257);
-  Buffer.from("00", "utf-8").copy(header, 263);
-
-  // Compute checksum
-  Buffer.from("        ", "utf-8").copy(header, 148); // 8 spaces for checksum field
-  let checksum = 0;
-  for (let i = 0; i < 512; i++) checksum += header[i];
-  Buffer.from(checksum.toString(8).padStart(6, "0") + "\0 ", "utf-8").copy(header, 148);
-
-  // Pad data to 512-byte boundary
-  const padding = (512 - (data.length % 512)) % 512;
-  return Buffer.concat([header, data, Buffer.alloc(padding)]);
+  throw new Error(`Timed out waiting for server at ${url}`);
 }
 
 // ── Public API ──
@@ -355,12 +600,10 @@ export async function buildWidget(widgetId: string): Promise<void> {
 const BUILD_TIMEOUT_MS = 120_000;
 
 export async function ensureWidget(widgetId: string): Promise<WidgetStatus> {
-  const port = await ensureRuntime();
-
   const existing = widgetStatuses.get(widgetId);
   if (existing && existing.status === "ready") {
-    if (existing.port === port) return existing;
-    // Port changed (container recreated) — re-check below
+    const wr = widgetRuntimes.get(widgetId);
+    if (wr) return existing;
   }
 
   const isStaleBuilding =
@@ -372,33 +615,22 @@ export async function ensureWidget(widgetId: string): Promise<WidgetStatus> {
     return existing;
   }
 
-  // Check if already built in the container
-  try {
-    const result = await execInRuntime(`test -f /app/dist/${widgetId}/index.html && echo exists`);
-    if (result.output.includes("exists")) {
-      const status: WidgetStatus = { status: "ready", port };
-      widgetStatuses.set(widgetId, status);
-      return status;
-    }
-  } catch {
-    // Not built yet
-  }
-
+  const port = await getPort({ port: portNumbers(4100, 4999) });
   const status: WidgetStatus = { status: "building", port, startedAt: Date.now() };
   widgetStatuses.set(widgetId, status);
   buildWidget(widgetId).catch((err) => {
-    console.error(`[widget-runtime] Background build failed for ${widgetId}:`, err);
+    console.error(`[secure-exec] Background build failed for ${widgetId}:`, err);
   });
   return status;
 }
 
 export async function rebuildWidget(widgetId: string): Promise<WidgetStatus> {
-  const port = await ensureRuntime();
+  const port = await getPort({ port: portNumbers(4100, 4999) });
   const status: WidgetStatus = { status: "building", port };
   widgetStatuses.set(widgetId, status);
 
   buildWidget(widgetId).catch((err) => {
-    console.error(`[widget-runtime] Rebuild failed for ${widgetId}:`, err);
+    console.error(`[secure-exec] Rebuild failed for ${widgetId}:`, err);
   });
 
   return status;
@@ -406,11 +638,15 @@ export async function rebuildWidget(widgetId: string): Promise<WidgetStatus> {
 
 export async function stopWidget(widgetId: string): Promise<void> {
   widgetStatuses.delete(widgetId);
-  if (!runtimeContainerId) return;
-  try {
-    await execInRuntime(`rm -rf /app/dist/${widgetId} /app/widgets/${widgetId}`);
-  } catch {
-    // Container might be gone
+  const wr = widgetRuntimes.get(widgetId);
+  if (wr) {
+    try {
+      await wr.runtime.terminate();
+      wr.runtime.dispose();
+    } catch {
+      // ignore
+    }
+    widgetRuntimes.delete(widgetId);
   }
 }
 
@@ -418,18 +654,31 @@ export function getWidgetStatus(widgetId: string): WidgetStatus | null {
   return widgetStatuses.get(widgetId) ?? null;
 }
 
-async function waitForReady(port: number, timeout = 60000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try {
-      const res = await fetch(`http://localhost:${port}/`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok || res.status === 404) return;
-    } catch {
-      // Not ready yet
-    }
-    await new Promise((r) => setTimeout(r, 500));
+export function getWidgetRuntime(widgetId: string): WidgetRuntime | null {
+  return widgetRuntimes.get(widgetId) ?? null;
+}
+
+export async function fetchFromWidget(
+  widgetId: string,
+  path: string,
+  headers?: Record<string, string>,
+): Promise<{ status: number; body: string; contentType: string } | null> {
+  const wr = widgetRuntimes.get(widgetId);
+  if (!wr) return null;
+
+  try {
+    const url = `http://127.0.0.1:${wr.port}/${path}`;
+    const response = await wr.runtime.network.fetch(url, {
+      method: "GET",
+      headers,
+    });
+
+    return {
+      status: response.status,
+      body: response.body,
+      contentType: response.headers?.["content-type"] ?? "text/html",
+    };
+  } catch {
+    return null;
   }
-  throw new Error(`Runtime container did not start within ${timeout}ms`);
 }

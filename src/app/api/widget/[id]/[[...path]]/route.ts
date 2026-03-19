@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { ensureWidget } from "@/lib/widget-runner";
+import { ensureWidget, fetchFromWidget } from "@/lib/widget-runner";
 import { getWidgetCode } from "@/db/widgets";
 
 const LOADING_HTML = `<!DOCTYPE html>
@@ -34,28 +34,25 @@ export async function GET(
     });
   }
 
-  // Proxy to the single runtime container: /<widgetId>/<subPath>
   const subPath = pathSegments?.join("/") ?? "";
-  const targetUrl = `http://localhost:${widget.port}/${id}/${subPath}${req.nextUrl.search}`;
 
   try {
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        Accept: req.headers.get("accept") ?? "*/*",
-        "Accept-Encoding": req.headers.get("accept-encoding") ?? "",
-      },
-      signal: AbortSignal.timeout(10000),
+    const result = await fetchFromWidget(id, subPath, {
+      Accept: req.headers.get("accept") ?? "*/*",
     });
 
-    const contentType =
-      upstream.headers.get("content-type") ?? "text/html";
+    if (!result) {
+      return new Response(LOADING_HTML, {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
 
-    if (!subPath && contentType.includes("text/html")) {
-      const html = await upstream.text();
+    if (!subPath && result.contentType.includes("text/html")) {
       const baseTag = `<base href="/api/widget/${id}/">`;
-      const patched = html.replace("<head>", `<head>${baseTag}`);
+      const patched = result.body.replace("<head>", `<head>${baseTag}`);
       return new Response(patched, {
-        status: upstream.status,
+        status: result.status,
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
@@ -63,10 +60,10 @@ export async function GET(
       });
     }
 
-    return new Response(upstream.body, {
-      status: upstream.status,
+    return new Response(result.body, {
+      status: result.status,
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": result.contentType,
         "Cache-Control": "no-store",
       },
     });

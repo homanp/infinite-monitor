@@ -47,7 +47,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "dockerode": "^4.0.9",
     "drizzle-orm": "^0.45.1",
     "geist": "^1.7.0",
     "get-port": "^7.1.0",
@@ -58,6 +57,7 @@
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "secure-exec": "^0.1.0",
     "shadcn": "^4.0.2",
     "streamdown": "^2.4.0",
     "tailwind-merge": "^3.5.0",
@@ -69,7 +69,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/dockerode": "^4.0.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
