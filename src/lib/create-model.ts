@@ -14,8 +14,18 @@ import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import { createAlibaba } from "@ai-sdk/alibaba";
 import { createDeepInfra } from "@ai-sdk/deepinfra";
 
+export interface CustomApiConfig {
+  id: string;
+  name: string;
+  endpoint: string;
+  type: "anthropic" | "openai";
+  apiKey?: string;
+  models: Array<{ id: string; name: string }>;
+  enabled: boolean;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ProviderFactory = (opts?: { apiKey?: string }) => (modelId: string) => any;
+type ProviderFactory = (opts?: { apiKey?: string; baseURL?: string }) => (modelId: string) => any;
 
 const providers: Record<string, ProviderFactory> = {
   anthropic: (opts) => createAnthropic(opts),
@@ -35,10 +45,39 @@ const providers: Record<string, ProviderFactory> = {
   deepinfra: (opts) => createDeepInfra(opts),
 };
 
-export function createModel(modelStr: string, apiKey?: string) {
+const CUSTOM_PROVIDER_PREFIX = "custom:";
+
+export function createModel(modelStr: string, apiKey?: string, customConfig?: CustomApiConfig) {
+  // Handle custom API provider format: "custom:api-id:model-id"
+  if (modelStr.startsWith(CUSTOM_PROVIDER_PREFIX)) {
+    if (!customConfig) {
+      throw new Error("Custom API configuration not found. Please check your custom API settings.");
+    }
+
+    const afterPrefix = modelStr.slice(CUSTOM_PROVIDER_PREFIX.length);
+    const colonIdx = afterPrefix.indexOf(":");
+    const modelId = colonIdx === -1 ? afterPrefix : afterPrefix.slice(colonIdx + 1);
+
+    const providerType = customConfig.type || "anthropic";
+    const factory = providers[providerType];
+    if (factory) {
+      const finalApiKey = customConfig.apiKey || apiKey;
+      if (!finalApiKey) {
+        throw new Error(`API key is required for custom API "${customConfig.name}". Please add an API key in the custom API settings.`);
+      }
+      const provider = factory({
+        apiKey: finalApiKey,
+        baseURL: customConfig.endpoint,
+      });
+      return provider(modelId);
+    }
+  }
+
+  // Standard provider format: "provider:model-id"
   const idx = modelStr.indexOf(":");
   const providerId = idx === -1 ? "anthropic" : modelStr.slice(0, idx);
   const modelId = idx === -1 ? modelStr : modelStr.slice(idx + 1);
+
   const factory = providers[providerId] ?? providers.anthropic;
   const provider = factory(apiKey ? { apiKey } : undefined);
   return provider(modelId);
