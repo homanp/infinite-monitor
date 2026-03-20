@@ -8,12 +8,18 @@ export interface MessageAttachment {
   url: string;
 }
 
+export interface ToolCallEntry {
+  toolName: string;
+  label: string;
+}
+
 export interface WidgetMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
   attachments?: MessageAttachment[];
+  toolCalls?: ToolCallEntry[];
 }
 
 export interface CanvasLayout {
@@ -81,6 +87,7 @@ interface WidgetStore {
   bumpIframeVersion: (widgetId: string) => void;
   setStreaming: (widgetId: string, streaming: boolean) => void;
   setCurrentAction: (widgetId: string, action: string | null) => void;
+  appendToolCallToMessage: (widgetId: string, messageId: string, entry: ToolCallEntry) => void;
   appendReasoningToMessage: (widgetId: string, messageId: string, text: string) => void;
   setReasoningStreaming: (widgetId: string, streaming: boolean) => void;
   removeWidget: (id: string) => void;
@@ -330,6 +337,23 @@ export const useWidgetStore = create<WidgetStore>()(
             next[widgetId] = action;
           }
           return { currentActions: next };
+        });
+      },
+
+      appendToolCallToMessage: (widgetId, messageId, entry) => {
+        set({
+          widgets: get().widgets.map((w) =>
+            w.id === widgetId
+              ? {
+                  ...w,
+                  messages: w.messages.map((m) =>
+                    m.id === messageId
+                      ? { ...m, toolCalls: [...(m.toolCalls ?? []), entry] }
+                      : m
+                  ),
+                }
+              : w
+          ),
         });
       },
 

@@ -7,7 +7,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import { MessageSquareDashed, Pencil, X, Cable, Server, Plus, Trash2 } from "lucide-react";
+import { MessageSquareDashed, Pencil, X, Cable, Server, Plus, Trash2, Wrench } from "lucide-react";
 import { nanoid } from "nanoid";
 import {
   Conversation,
@@ -161,26 +161,43 @@ function ConversationMessages({
 
   return (
     <>
-      {messages.map((msg) => (
-        <Fragment key={msg.id}>
-          {msg.role === "assistant" && msg.reasoning && (
-            <ReasoningBlock
-              text={msg.reasoning}
-              isStreaming={isReasoningStreaming && msg.id === streamingMsgId}
-            />
-          )}
-          {(msg.role === "user" || msg.content) && (
-            <Message from={msg.role}>
-              {msg.attachments && msg.attachments.length > 0 && (
-                <MessageAttachments attachments={msg.attachments} />
-              )}
-              <MessageContent>
-                <MessageResponse>{msg.content}</MessageResponse>
-              </MessageContent>
-            </Message>
-          )}
-        </Fragment>
-      ))}
+      {messages.map((msg) => {
+        const isCurrentlyStreaming = msg.id === streamingMsgId;
+        const toolCalls = msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0
+          ? msg.toolCalls
+          : null;
+
+        return (
+          <Fragment key={msg.id}>
+            {msg.role === "assistant" && msg.reasoning && (
+              <ReasoningBlock
+                text={msg.reasoning}
+                isStreaming={isReasoningStreaming && isCurrentlyStreaming}
+              />
+            )}
+            {toolCalls && (
+              <div className="pl-0.5 space-y-0.5 my-1">
+                {toolCalls.map((tc, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                    <Wrench className="size-3 shrink-0" />
+                    <span className="truncate">{tc.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(msg.role === "user" || msg.content) && (
+              <Message from={msg.role}>
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <MessageAttachments attachments={msg.attachments} />
+                )}
+                <MessageContent>
+                  <MessageResponse>{msg.content}</MessageResponse>
+                </MessageContent>
+              </Message>
+            )}
+          </Fragment>
+        );
+      })}
       {(activeAction || showPlanningNextMoves) && (
         <div className="pl-0.5 max-w-full overflow-hidden">
           <Shimmer className="text-xs truncate block max-w-full" duration={1.5}>
@@ -229,6 +246,7 @@ async function streamToWidget(
     bumpIframeVersion,
     setStreaming,
     setCurrentAction,
+    appendToolCallToMessage,
     appendReasoningToMessage,
     setReasoningStreaming,
   } = useWidgetStore.getState();
@@ -355,7 +373,13 @@ async function streamToWidget(
             } else {
               action = `Using ${event.toolName}`;
             }
-            if (action) setCurrentAction(widgetId, action);
+            if (action) {
+              setCurrentAction(widgetId, action);
+              appendToolCallToMessage(widgetId, currentMsgId, {
+                toolName: event.toolName,
+                label: action,
+              });
+            }
           } else if (event.type === "tool-result") {
             setCurrentAction(widgetId, null);
           } else if (event.type === "abort") {
