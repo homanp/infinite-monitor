@@ -148,16 +148,7 @@ function ConversationMessages({
   streamingMsgId: string | null;
   activeAction: string | null;
 }) {
-  const streamingMessage =
-    (streamingMsgId
-      ? messages.find((message) => message.id === streamingMsgId)
-      : null) ?? null;
-  const showPlanningNextMoves =
-    isStreaming &&
-    !isReasoningStreaming &&
-    !activeAction &&
-    Boolean(streamingMessage) &&
-    !streamingMessage?.content;
+  const showPlanningNextMoves = isStreaming && !activeAction;
 
   return (
     <>
@@ -240,6 +231,36 @@ async function streamToWidget(
 
   let fullText = "";
   let hasEmittedText = false;
+  let activeActionStartedAt = 0;
+  let activeActionVersion = 0;
+  let pendingActionClear: ReturnType<typeof setTimeout> | null = null;
+  const MIN_ACTION_VISIBLE_MS = 700;
+
+  function showAction(action: string) {
+    activeActionVersion += 1;
+    activeActionStartedAt = Date.now();
+    if (pendingActionClear) {
+      clearTimeout(pendingActionClear);
+      pendingActionClear = null;
+    }
+    setCurrentAction(widgetId, action);
+  }
+
+  function clearActionWithMinimumVisibility() {
+    const versionAtSchedule = activeActionVersion;
+    const elapsed = activeActionStartedAt ? Date.now() - activeActionStartedAt : MIN_ACTION_VISIBLE_MS;
+    const delay = Math.max(0, MIN_ACTION_VISIBLE_MS - elapsed);
+
+    if (pendingActionClear) {
+      clearTimeout(pendingActionClear);
+    }
+
+    pendingActionClear = setTimeout(() => {
+      pendingActionClear = null;
+      if (activeActionVersion !== versionAtSchedule) return;
+      setCurrentAction(widgetId, null);
+    }, delay);
+  }
 
   function startNewAssistantMessage() {
     currentMsgId = nanoid();
@@ -328,7 +349,7 @@ async function streamToWidget(
           } else if (event.type === "widget-code") {
             if (event.code) {
               setWidgetCode(widgetId, event.code);
-              setCurrentAction(widgetId, "Building widget…");
+              showAction("Building widget…");
               setTimeout(() => bumpIframeVersion(widgetId), 15000);
             }
           } else if (event.type === "tool-call") {
@@ -355,9 +376,9 @@ async function streamToWidget(
             } else {
               action = `Using ${event.toolName}`;
             }
-            if (action) setCurrentAction(widgetId, action);
+            if (action) showAction(action);
           } else if (event.type === "tool-result") {
-            setCurrentAction(widgetId, null);
+            clearActionWithMinimumVisibility();
           } else if (event.type === "abort") {
             updateAssistantMessage(
               widgetId,
@@ -384,6 +405,9 @@ async function streamToWidget(
     }
   } finally {
     abortControllers.delete(widgetId);
+    if (pendingActionClear) {
+      clearTimeout(pendingActionClear);
+    }
     setCurrentAction(widgetId, null);
     setReasoningStreaming(widgetId, false);
     setStreaming(widgetId, false);
