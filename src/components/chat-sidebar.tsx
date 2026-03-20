@@ -148,7 +148,7 @@ function ConversationMessages({
   streamingMsgId: string | null;
   activeAction: string | null;
 }) {
-  const showPlanningNextMoves = isStreaming && !activeAction;
+  const showPlanningNextMoves = isStreaming && !isReasoningStreaming && !activeAction;
 
   return (
     <>
