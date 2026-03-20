@@ -888,19 +888,6 @@ export function ChatSidebar() {
             />
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
-                {isActiveStreaming ? (
-                  <span className="flex items-center gap-2 text-[9px] px-2">
-                    <KittLoader />
-                    <span className="text-zinc-400">esc to interrupt</span>
-                  </span>
-                ) : (
-                  <PromptInputFileUpload
-                    onFiles={handleFiles}
-                    disabled={isActiveStreaming}
-                  />
-                )}
-              </div>
-              <div className="flex items-center gap-1">
                 {!isActiveStreaming && (
                   <>
                     {modelTrigger}
@@ -926,6 +913,20 @@ export function ChatSidebar() {
                     </button>
                     <McpConfigDialog open={mcpOpen} onOpenChange={setMcpOpen} />
                   </>
+                )}
+                {isActiveStreaming && (
+                  <span className="flex items-center gap-2 px-2 text-[9px]">
+                    <KittLoader />
+                    <span className="text-zinc-400">esc to interrupt</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {!isActiveStreaming && (
+                  <PromptInputFileUpload
+                    onFiles={handleFiles}
+                    disabled={isActiveStreaming}
+                  />
                 )}
                 <PromptInputSubmit
                   disabled={(!input.trim() && pendingFiles.length === 0) || !activeWidget || isActiveStreaming}
