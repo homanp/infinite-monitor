@@ -175,16 +175,6 @@ function ConversationMessages({
                 isStreaming={isReasoningStreaming && isCurrentlyStreaming}
               />
             )}
-            {toolCalls && (
-              <div className="pl-0.5 space-y-0.5 my-1">
-                {toolCalls.map((tc, i) => (
-                  <div key={i} className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                    <Wrench className="size-3 shrink-0" />
-                    <span className="truncate">{tc.label}</span>
-                  </div>
-                ))}
-              </div>
-            )}
             {(msg.role === "user" || msg.content) && (
               <Message from={msg.role}>
                 {msg.attachments && msg.attachments.length > 0 && (
@@ -194,6 +184,17 @@ function ConversationMessages({
                   <MessageResponse>{msg.content}</MessageResponse>
                 </MessageContent>
               </Message>
+            )}
+            {/* Below the bubble so tool lines stay visible when scrolled to the latest reply */}
+            {toolCalls && (
+              <div className="pl-0.5 space-y-0.5 my-1">
+                {toolCalls.map((tc, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                    <Wrench className="size-3 shrink-0" />
+                    <span className="truncate">{tc.label}</span>
+                  </div>
+                ))}
+              </div>
             )}
           </Fragment>
         );
