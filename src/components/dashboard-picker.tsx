@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useWidgetStore } from "@/store/widget-store";
-import { scheduleSyncToServer } from "@/lib/sync-db";
+import { flushSyncToServer, scheduleSyncToServer } from "@/lib/sync-db";
 
 export function DashboardPicker() {
   const dashboards = useWidgetStore((s) => s.dashboards);
@@ -98,19 +98,7 @@ export function DashboardPicker() {
         body: JSON.stringify({ id: wid }),
       }).catch(() => {});
     }
-    fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        dashboards: useWidgetStore.getState().dashboards.map((d) => ({
-          id: d.id, title: d.title, widgetIds: d.widgetIds, createdAt: d.createdAt,
-        })),
-        widgets: useWidgetStore.getState().widgets.map((w) => ({
-          id: w.id, title: w.title, description: w.description, code: w.code,
-          layout: w.layout, messages: w.messages,
-        })),
-      }),
-    }).catch(() => {});
+    flushSyncToServer().catch(() => {});
   }, [removeDashboard, dashboards]);
 
   if (dashboards.length === 0) return null;
