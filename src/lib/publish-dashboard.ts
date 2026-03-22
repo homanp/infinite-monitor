@@ -212,6 +212,7 @@ async function doPublishDashboard(dashboardId: string): Promise<PublishDashboard
 
   const riverrun = getRequiredRiverrunClient();
   await riverrun.createStream(SHARE_BUCKET, snapshotStreamId);
+  await riverrun.createStream(SHARE_BUCKET, traceStreamId);
 
   const { body, nextOffset } = await riverrun.appendJson(
     SHARE_BUCKET,

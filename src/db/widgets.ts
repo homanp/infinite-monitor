@@ -110,6 +110,19 @@ export function getAllDashboards(): DashboardRecord[] {
   return db.select().from(dashboards).all();
 }
 
+export function getDashboardByWidgetId(widgetId: string): DashboardRecord | undefined {
+  return db.select()
+    .from(dashboards)
+    .where(
+      sql`EXISTS (
+        SELECT 1
+        FROM json_each(COALESCE(${dashboards.widgetIdsJson}, '[]'))
+        WHERE json_each.value = ${widgetId}
+      )`,
+    )
+    .get();
+}
+
 export function upsertDashboard(data: {
   id: string;
   title?: string;

@@ -17,6 +17,7 @@ import {
 } from "@/db/widgets";
 import { webSearch, type SearchProvider } from "@/lib/web-search";
 import { scanUrls } from "@/lib/brin";
+import { maybeCreatePublishedTraceRecorder } from "@/lib/share-trace";
 
 interface McpServerPayload {
   name: string;
@@ -36,6 +37,72 @@ interface CustomApiPayload {
   apiKey?: string;
   models: Array<{ id: string; name: string }>;
   enabled: boolean;
+}
+
+function truncateTraceDetail(value: string, maxLength = 120) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+}
+
+function summarizeTraceToolCall(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+) {
+  if (toolName === "writeFile") {
+    return {
+      kind: "file-written" as const,
+      detail: `Wrote ${String(input?.path ?? "file")}`,
+      path: typeof input?.path === "string" ? input.path : undefined,
+      toolName,
+    };
+  }
+
+  if (toolName === "readFile") {
+    return {
+      kind: "tool-call" as const,
+      detail: `Read ${String(input?.path ?? "file")}`,
+      path: typeof input?.path === "string" ? input.path : undefined,
+      toolName,
+    };
+  }
+
+  if (toolName === "bash") {
+    return {
+      kind: "tool-call" as const,
+      detail: `Ran ${truncateTraceDetail(String(input?.command ?? "command"))}`,
+      toolName,
+    };
+  }
+
+  if (toolName === "listDashboardWidgets") {
+    return {
+      kind: "tool-call" as const,
+      detail: "Checked dashboard widgets",
+      toolName,
+    };
+  }
+
+  if (toolName === "readWidgetCode") {
+    return {
+      kind: "tool-call" as const,
+      detail: `Read sibling widget ${String(input?.targetWidgetId ?? "code")}`,
+      path: typeof input?.path === "string" ? input.path : undefined,
+      toolName,
+    };
+  }
+
+  if (toolName === "web_search") {
+    return {
+      kind: "tool-call" as const,
+      detail: `Searched ${truncateTraceDetail(String(input?.query ?? "the web"))}`,
+      toolName,
+    };
+  }
+
+  return {
+    kind: "tool-call" as const,
+    detail: `Used ${toolName}`,
+    toolName,
+  };
 }
 
 const SYSTEM_PROMPT = `You are a coding agent that builds React widget components.
@@ -170,6 +237,10 @@ export async function POST(request: Request) {
 
   const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
   const useAnthropic = isAnthropicModel(selectedModel);
+  const traceRecorder = await maybeCreatePublishedTraceRecorder(widgetId).catch((err) => {
+    console.error("[share-trace] Failed to initialize recorder:", err);
+    return null;
+  });
 
   // Prepare custom API config if using a custom provider
   const customConfig: CustomApiConfig | undefined = customApi
@@ -361,6 +432,8 @@ export async function POST(request: Request) {
       };
 
       try {
+        traceRecorder?.record("run-start", "Started widget generation");
+
         for await (const part of result.fullStream) {
           switch (part.type) {
             case "reasoning-delta":
@@ -373,6 +446,12 @@ export async function POST(request: Request) {
 
             case "tool-call": {
               const input = part.input as Record<string, unknown> | undefined;
+              const traceEvent = summarizeTraceToolCall(part.toolName, input);
+              traceRecorder?.record(traceEvent.kind, traceEvent.detail, {
+                toolName: traceEvent.toolName,
+                path: traceEvent.path,
+              });
+
               if (part.toolName === "writeFile") {
                 send({ type: "widget-file", path: input?.path, content: input?.content });
                 if (input?.path === "src/App.tsx") {
@@ -428,19 +507,30 @@ export async function POST(request: Request) {
               break;
 
             case "abort":
+              traceRecorder?.record("run-abort", "Widget generation was interrupted");
               send({ type: "abort" });
               break;
 
             case "error":
+              traceRecorder?.record(
+                "run-error",
+                truncateTraceDetail(`Error: ${String(part.error)}`),
+              );
               send({ type: "error", error: String(part.error) });
               break;
           }
         }
 
+        traceRecorder?.record("run-finished", "Completed widget generation");
         send({ type: "done" });
       } catch (err) {
+        traceRecorder?.record(
+          "run-error",
+          truncateTraceDetail(`Error: ${String(err)}`),
+        );
         send({ type: "error", error: String(err) });
       } finally {
+        void traceRecorder?.flush();
         for (const client of mcpClients) {
           client.close().catch(() => {});
         }

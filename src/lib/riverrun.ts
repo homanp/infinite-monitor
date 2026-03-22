@@ -8,12 +8,28 @@ export interface RiverrunHeadResult {
   nextOffset: string | null;
 }
 
+export interface RiverrunBootstrapPart {
+  contentType: string | null;
+  body: string;
+}
+
+export interface RiverrunBootstrapResult {
+  snapshotOffset: string | null;
+  nextOffset: string | null;
+  upToDate: boolean;
+  parts: RiverrunBootstrapPart[];
+}
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
 function encodeSegment(value: string) {
   return encodeURIComponent(value);
+}
+
+function decodeHeaderValue(value: string) {
+  return value.replace(/^"|"$/g, "");
 }
 
 async function readErrorMessage(response: Response) {
@@ -34,13 +50,95 @@ function getNextOffset(response: Response) {
     ?? response.headers.get("stream-next-offset");
 }
 
+function getSnapshotOffset(response: Response) {
+  return response.headers.get("Stream-Snapshot-Offset")
+    ?? response.headers.get("stream-snapshot-offset");
+}
+
+function getUpToDate(response: Response) {
+  const value = response.headers.get("Stream-Up-To-Date")
+    ?? response.headers.get("stream-up-to-date");
+  return value === "true";
+}
+
+function getMultipartBoundary(contentType: string) {
+  const match = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!match) {
+    return null;
+  }
+
+  return decodeHeaderValue(match[1] ?? match[2] ?? "").trim() || null;
+}
+
+function parseMultipartHeaders(headerBlock: string) {
+  const headers = new Map<string, string>();
+
+  for (const line of headerBlock.split("\n")) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const name = line.slice(0, separatorIndex).trim().toLowerCase();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (name) {
+      headers.set(name, value);
+    }
+  }
+
+  return headers;
+}
+
+function parseMultipartMixed(body: string, boundary: string): RiverrunBootstrapPart[] {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const marker = `--${boundary}`;
+  const segments = normalized.split(marker);
+  const parts: RiverrunBootstrapPart[] = [];
+
+  for (const segment of segments) {
+    const trimmedStart = segment.replace(/^\n+/, "");
+    const trimmed = trimmedStart.trim();
+    if (!trimmed || trimmed === "--") {
+      continue;
+    }
+
+    const bodyWithoutClosing = trimmedStart.replace(/\n--\s*$/, "");
+    const separatorIndex = bodyWithoutClosing.indexOf("\n\n");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const headerBlock = bodyWithoutClosing.slice(0, separatorIndex);
+    const partBody = bodyWithoutClosing
+      .slice(separatorIndex + 2)
+      .replace(/\n$/, "");
+    const headers = parseMultipartHeaders(headerBlock);
+
+    parts.push({
+      contentType: headers.get("content-type") ?? null,
+      body: partBody,
+    });
+  }
+
+  return parts;
+}
+
 export function createRiverrunClient(baseUrl: string) {
   const normalizedBaseUrl = trimTrailingSlash(baseUrl);
 
-  async function request(path: string, init: RequestInit = {}) {
+  async function request(
+    path: string,
+    init: RequestInit = {},
+    options: { timeoutMs?: number | null } = {},
+  ) {
+    const { timeoutMs = 10_000 } = options;
+    const signal = init.signal ?? (
+      timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs)
+    );
+
     return fetch(`${normalizedBaseUrl}${path}`, {
       ...init,
-      signal: init.signal ?? AbortSignal.timeout(10_000),
+      ...(signal ? { signal } : {}),
     });
   }
 
@@ -117,11 +215,11 @@ export function createRiverrunClient(baseUrl: string) {
       return JSON.parse(text) as T;
     },
 
-    async bootstrap<T>(bucket: string, streamId: string): Promise<T | null> {
+    async bootstrap(bucket: string, streamId: string): Promise<RiverrunBootstrapResult | null> {
       const response = await request(`${streamPath(bucket, streamId)}/bootstrap`, {
         method: "GET",
         headers: {
-          Accept: "application/json",
+          Accept: "multipart/mixed",
         },
       });
 
@@ -130,12 +228,19 @@ export function createRiverrunClient(baseUrl: string) {
       }
 
       await assertResponseOk(response);
-      const text = await response.text();
-      if (!text.trim()) {
-        return null;
+      const contentType = response.headers.get("Content-Type") ?? "";
+      const boundary = getMultipartBoundary(contentType);
+      if (!boundary) {
+        throw new Error("Riverrun bootstrap response did not include a multipart boundary");
       }
 
-      return JSON.parse(text) as T;
+      const body = await response.text();
+      return {
+        snapshotOffset: getSnapshotOffset(response),
+        nextOffset: getNextOffset(response),
+        upToDate: getUpToDate(response),
+        parts: parseMultipartMixed(body, boundary),
+      };
     },
 
     async head(bucket: string, streamId: string): Promise<RiverrunHeadResult> {
@@ -155,7 +260,12 @@ export function createRiverrunClient(baseUrl: string) {
       };
     },
 
-    async tailSse(bucket: string, streamId: string, offset = "now") {
+    async tailSse(
+      bucket: string,
+      streamId: string,
+      offset = "now",
+      signal?: AbortSignal,
+    ) {
       const response = await request(
         `${streamPath(bucket, streamId)}?offset=${encodeSegment(offset)}&live=sse`,
         {
@@ -163,7 +273,9 @@ export function createRiverrunClient(baseUrl: string) {
           headers: {
             Accept: "text/event-stream",
           },
+          ...(signal ? { signal } : {}),
         },
+        { timeoutMs: null },
       );
 
       await assertResponseOk(response);

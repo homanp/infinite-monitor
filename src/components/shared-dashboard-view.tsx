@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, Eye } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { SharedTracePanel } from "@/components/shared-trace-panel";
 import {
   CELL_H,
   CELL_W,
@@ -84,7 +85,13 @@ function fitViewport(
   };
 }
 
-function PublishedWidgetCard({ widget }: { widget: PublishedWidgetSnapshotV1 }) {
+function PublishedWidgetCard({
+  widget,
+  active,
+}: {
+  widget: PublishedWidgetSnapshotV1;
+  active: boolean;
+}) {
   const pixelWidth = gridWidth(widget.layout.w);
   const pixelHeight = gridHeight(widget.layout.h);
   const iframeSrc = `/api/widget/${widget.publishedWidgetId}/`;
@@ -101,7 +108,7 @@ function PublishedWidgetCard({ widget }: { widget: PublishedWidgetSnapshotV1 }) 
         height: pixelHeight,
       }}
     >
-      <Card className="h-full gap-0 border-zinc-700 bg-zinc-800 py-0 ring-zinc-700">
+      <Card className={`h-full gap-0 py-0 ${active ? "border-teal-500/40 bg-zinc-800 ring-teal-500/60" : "border-zinc-700 bg-zinc-800 ring-zinc-700"}`}>
         <div className="border-b border-zinc-700 px-3 py-2">
           <div className="truncate text-xs font-medium uppercase tracking-wider text-zinc-200">
             {widget.title}
@@ -152,6 +159,7 @@ export function SharedDashboardView({
 }: {
   snapshot: PublishedDashboardSnapshotV1;
 }) {
+  const [activeReplayWidgetId, setActiveReplayWidgetId] = useState<string | null>(null);
   const [manualViewport, setManualViewport] = useState<{
     panX: number;
     panY: number;
@@ -212,38 +220,48 @@ export function SharedDashboardView({
         </div>
       </header>
 
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
-        {canvasItems.length === 0 ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-500">
-            No published items in this dashboard snapshot.
-          </div>
-        ) : (
-          <>
-            <InfiniteCanvas
-              panX={viewport.panX}
-              panY={viewport.panY}
-              zoom={viewport.zoom}
-              onViewportChange={(panX, panY, zoom) => setManualViewport({ panX, panY, zoom })}
-            >
-              {snapshot.widgets.map((widget) => (
-                <PublishedWidgetCard key={widget.publishedWidgetId} widget={widget} />
-              ))}
-              {snapshot.textBlocks.map((textBlock) => (
-                <PublishedTextBlock key={textBlock.id} textBlock={textBlock} />
-              ))}
-            </InfiniteCanvas>
-            <ZoomControls
-              zoom={viewport.zoom}
-              panX={viewport.panX}
-              panY={viewport.panY}
-              containerWidth={containerSize.width}
-              containerHeight={containerSize.height}
-              widgets={snapshot.widgets}
-              textBlocks={snapshot.textBlocks}
-              onViewportChange={(panX, panY, zoom) => setManualViewport({ panX, panY, zoom })}
-            />
-          </>
-        )}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
+          {canvasItems.length === 0 ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-500">
+              No published items in this dashboard snapshot.
+            </div>
+          ) : (
+            <>
+              <InfiniteCanvas
+                panX={viewport.panX}
+                panY={viewport.panY}
+                zoom={viewport.zoom}
+                onViewportChange={(panX, panY, zoom) => setManualViewport({ panX, panY, zoom })}
+              >
+                {snapshot.widgets.map((widget) => (
+                  <PublishedWidgetCard
+                    key={widget.publishedWidgetId}
+                    widget={widget}
+                    active={activeReplayWidgetId === widget.publishedWidgetId}
+                  />
+                ))}
+                {snapshot.textBlocks.map((textBlock) => (
+                  <PublishedTextBlock key={textBlock.id} textBlock={textBlock} />
+                ))}
+              </InfiniteCanvas>
+              <ZoomControls
+                zoom={viewport.zoom}
+                panX={viewport.panX}
+                panY={viewport.panY}
+                containerWidth={containerSize.width}
+                containerHeight={containerSize.height}
+                widgets={snapshot.widgets}
+                textBlocks={snapshot.textBlocks}
+                onViewportChange={(panX, panY, zoom) => setManualViewport({ panX, panY, zoom })}
+              />
+            </>
+          )}
+        </div>
+        <SharedTracePanel
+          shareId={snapshot.shareId}
+          onActiveWidgetChange={setActiveReplayWidgetId}
+        />
       </div>
     </div>
   );
