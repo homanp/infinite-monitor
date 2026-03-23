@@ -796,7 +796,9 @@ export function ChatSidebar() {
       })
         .then((res) => res.ok ? res.json() : null)
         .then((data) => {
-          if (data?.title) renameWidget(widgetId, data.title);
+          if (data?.title) {
+            renameWidget(widgetId, data.title);
+          }
         })
         .catch(() => {});
     }
@@ -831,7 +833,9 @@ export function ChatSidebar() {
               type="text"
               value={activeWidget?.title ?? ""}
               onChange={(e) => {
-                if (activeWidget) renameWidget(activeWidget.id, e.target.value);
+                if (activeWidget) {
+                  renameWidget(activeWidget.id, e.target.value);
+                }
               }}
               className="min-w-0 flex-1 bg-transparent text-xs font-medium uppercase tracking-wider text-zinc-100 outline-none placeholder:text-zinc-500"
               placeholder="Widget name…"

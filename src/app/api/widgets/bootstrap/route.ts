@@ -4,7 +4,7 @@ import {
   addWidgetDependencies,
   rebuildWidget,
 } from "@/lib/widget-runner";
-import { scheduleLiveDashboardAppendForWidget } from "@/lib/publish-dashboard";
+import { scheduleSharedDashboardAppendForWidget } from "@/lib/session-stream";
 
 export async function POST(request: Request) {
   const { widgets } = (await request.json()) as {
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     rebuildWidget(w.id).catch((err) => {
       console.error(`[bootstrap] build failed for ${w.id}:`, err);
     });
-    scheduleLiveDashboardAppendForWidget(w.id, 0);
+    scheduleSharedDashboardAppendForWidget(w.id, 0);
   }
 
   return Response.json({ ok: true, count: widgets.length, queued: true });

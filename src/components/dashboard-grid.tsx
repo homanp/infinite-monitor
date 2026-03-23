@@ -5,7 +5,7 @@ import { LayoutGrid, TrendingUp, Shield, Globe } from "lucide-react";
 import { useWidgetStore } from "@/store/widget-store";
 import { WidgetCard } from "@/components/widget-card";
 import { TextBlockItem } from "@/components/text-block-item";
-import { deleteWidgetFromDb, deleteTextBlockFromDb, scheduleSyncToServer } from "@/lib/sync-db";
+import { deleteWidgetFromDb, deleteTextBlockFromDb } from "@/lib/sync-db";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AddMenu } from "@/components/add-menu";
 import { CELL_W, CELL_H, MARGIN, InfiniteCanvas } from "@/components/infinite-canvas";
@@ -86,7 +86,6 @@ function TemplateGallery({ containerRef }: { containerRef: React.RefObject<HTMLD
       setViewport(activeDashboardId, { panX: fitPanX, panY: fitPanY, zoom: fitZoom });
     }
 
-    scheduleSyncToServer();
     setApplying(null);
   };
 
@@ -229,7 +228,6 @@ export function DashboardGrid() {
   const handleTextBlockTextChange = useCallback(
     (id: string, text: string) => {
       updateTextBlock(id, { text });
-      scheduleSyncToServer();
     },
     [updateTextBlock]
   );
@@ -237,7 +235,6 @@ export function DashboardGrid() {
   const handleTextBlockFontSizeChange = useCallback(
     (id: string, fontSize: number) => {
       updateTextBlock(id, { fontSize });
-      scheduleSyncToServer();
     },
     [updateTextBlock]
   );
@@ -245,7 +242,6 @@ export function DashboardGrid() {
   const handleTextBlockLayoutChange = useCallback(
     (id: string, layout: CanvasLayout) => {
       updateTextBlockLayout(id, layout);
-      scheduleSyncToServer();
     },
     [updateTextBlockLayout]
   );

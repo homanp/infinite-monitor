@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useWidgetStore } from "@/store/widget-store";
-import { flushSyncToServer, scheduleSyncToServer } from "@/lib/sync-db";
+import { flushSyncToServer } from "@/lib/sync-db";
 
 export function DashboardPicker() {
   const dashboards = useWidgetStore((s) => s.dashboards);
@@ -58,7 +58,6 @@ export function DashboardPicker() {
     setOpen(false);
     setEditingId(null);
     setCreatingNew(false);
-    scheduleSyncToServer();
   }, [setActiveDashboard]);
 
   const handleStartEdit = useCallback((e: React.MouseEvent, id: string, title: string) => {
@@ -70,7 +69,6 @@ export function DashboardPicker() {
   const handleFinishEdit = useCallback(() => {
     if (editingId && editValue.trim()) {
       renameDashboard(editingId, editValue.trim());
-      scheduleSyncToServer();
     }
     setEditingId(null);
   }, [editingId, editValue, renameDashboard]);
@@ -81,7 +79,6 @@ export function DashboardPicker() {
     setActiveDashboard(id);
     setCreatingNew(false);
     setNewName("");
-    scheduleSyncToServer();
   }, [newName, addDashboard, setActiveDashboard]);
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {

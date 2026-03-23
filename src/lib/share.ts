@@ -18,12 +18,8 @@ export function deriveShareId(dashboardId: string, explicitSecret?: string) {
   return `shr_${digest.slice(0, 22)}`;
 }
 
-export function getDashboardStreamId(shareId: string) {
-  return `${shareId}.dashboard`;
-}
-
-export function getTraceStreamId(shareId: string) {
-  return `${shareId}.trace`;
+export function getSessionStreamId(shareId: string) {
+  return `${shareId}.session`;
 }
 
 export function getPublishedWidgetId(shareId: string, sourceWidgetId: string) {

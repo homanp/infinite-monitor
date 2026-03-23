@@ -1,17 +1,21 @@
-import { bootstrapPublishedDashboardTrace } from "@/lib/share-trace";
+import { bootstrapSharedSession } from "@/lib/session-stream";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ shareId: string }> },
 ) {
   const { shareId } = await params;
-  const result = await bootstrapPublishedDashboardTrace(shareId);
+  const result = await bootstrapSharedSession(shareId);
 
   if (result.status === "ready") {
     return Response.json({
-      trace: result.trace,
+      snapshot: result.snapshot,
       nextOffset: result.nextOffset,
     });
+  }
+
+  if (result.status === "unavailable") {
+    return Response.json({ error: "Shared session not found" }, { status: 404 });
   }
 
   return Response.json(

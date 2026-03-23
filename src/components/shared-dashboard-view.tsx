@@ -13,16 +13,15 @@ import {
 import { ZoomControls } from "@/components/zoom-controls";
 import { DEFAULT_CANVAS_VIEWPORT } from "@/lib/canvas-viewport";
 import type {
-  DashboardSharedStateV1,
   PublishedCanvasLayout,
   PublishedTextBlockSnapshotV1,
   PublishedWidgetSnapshotV1,
+  SharedSessionSnapshotV1,
 } from "@/lib/share-types";
-
-type SharedDashboardRenderable = Pick<
-  DashboardSharedStateV1,
-  "shareId" | "title" | "updatedAt" | "viewport" | "widgets" | "textBlocks"
->;
+import {
+  buildSharedSessionReplayFrames,
+  buildSharedSessionReplaySnapshot,
+} from "@/lib/share-types";
 
 function formatTimestamp(value: string) {
   return value.replace(".000Z", "Z").replace("T", " ");
@@ -159,11 +158,12 @@ function PublishedTextBlock({ textBlock }: { textBlock: PublishedTextBlockSnapsh
 }
 
 export function SharedDashboardView({
-  dashboard,
+  snapshot,
+  liveError,
 }: {
-  dashboard: SharedDashboardRenderable;
+  snapshot: SharedSessionSnapshotV1;
+  liveError?: string | null;
 }) {
-  const [activeReplayWidgetId, setActiveReplayWidgetId] = useState<string | null>(null);
   const [manualViewport, setManualViewport] = useState<{
     panX: number;
     panY: number;
@@ -171,13 +171,63 @@ export function SharedDashboardView({
   } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const canvasItems = useMemo(
-    () => [...dashboard.widgets, ...dashboard.textBlocks],
-    [dashboard.textBlocks, dashboard.widgets],
+  const replayFrames = useMemo(
+    () => buildSharedSessionReplayFrames(snapshot.replayEvents),
+    [snapshot.replayEvents],
   );
+  const replayStepCount = replayFrames.length > 0 ? replayFrames.length - 1 : 0;
+  const [replayFrameIndex, setReplayFrameIndex] = useState(replayStepCount);
+  const previousReplayStepCountRef = useRef(replayStepCount);
+
+  useEffect(() => {
+    const previousReplayStepCount = previousReplayStepCountRef.current;
+    if (replayStepCount === previousReplayStepCount) {
+      return;
+    }
+
+    previousReplayStepCountRef.current = replayStepCount;
+    setReplayFrameIndex((currentReplayFrameIndex) => {
+      if (replayStepCount === 0) {
+        return 0;
+      }
+
+      if (currentReplayFrameIndex >= previousReplayStepCount) {
+        return replayStepCount;
+      }
+
+      return Math.min(currentReplayFrameIndex, replayStepCount);
+    });
+  }, [replayStepCount]);
+
+  const effectiveSnapshot = useMemo(() => {
+    if (replayFrames.length === 0) {
+      return snapshot;
+    }
+
+    return buildSharedSessionReplaySnapshot(
+      snapshot.shareId,
+      snapshot.replayEvents,
+      replayFrameIndex,
+    );
+  }, [replayFrameIndex, replayFrames.length, snapshot]);
+  const dashboard = effectiveSnapshot.dashboard ?? snapshot.dashboard;
+  const session = effectiveSnapshot.session;
+  const currentReplayFrame = replayFrames[replayFrameIndex] ?? null;
+  const activeReplayWidgetId = currentReplayFrame?.traceEvent?.publishedWidgetId
+    ?? session.activeWidgetId
+    ?? null;
+  const canvasItems = useMemo(
+    () => [
+      ...(dashboard?.widgets ?? []),
+      ...(dashboard?.textBlocks ?? []),
+    ],
+    [dashboard],
+  );
+  const liveAction = session.activeWidgetId
+    ? session.currentActions[session.activeWidgetId] ?? null
+    : null;
   const viewport = manualViewport
-    ?? dashboard.viewport
+    ?? dashboard?.viewport
     ?? fitViewport(canvasItems, containerSize.width, containerSize.height);
 
   useEffect(() => {
@@ -202,6 +252,10 @@ export function SharedDashboardView({
     return () => observer.disconnect();
   }, []);
 
+  if (!dashboard) {
+    return null;
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-900">
       <header className="flex items-center justify-between gap-4 border-b border-zinc-800 px-5 py-3">
@@ -216,7 +270,7 @@ export function SharedDashboardView({
         <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
           <span className="inline-flex items-center gap-1.5">
             <Eye className="h-3.5 w-3.5" />
-            Live sync
+            {liveAction ?? "Live sync"}
           </span>
           {dashboard.updatedAt && (
             <span className="inline-flex items-center gap-1.5">
@@ -266,8 +320,13 @@ export function SharedDashboardView({
           )}
         </div>
         <SharedTracePanel
-          shareId={dashboard.shareId}
-          onActiveWidgetChange={setActiveReplayWidgetId}
+          key={snapshot.shareId}
+          liveSession={snapshot.session}
+          replaySession={session}
+          replayFrames={replayFrames}
+          replayFrameIndex={replayFrameIndex}
+          onReplayFrameIndexChange={setReplayFrameIndex}
+          liveError={liveError}
         />
       </div>
     </div>

@@ -4,6 +4,12 @@ import { DEFAULT_CANVAS_VIEWPORT } from "@/lib/canvas-viewport";
 let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 let pendingSync: Promise<void> | null = null;
 
+type WidgetStoreSnapshot = ReturnType<typeof useWidgetStore.getState>;
+type DurableWidgetStoreSnapshot = Pick<
+  WidgetStoreSnapshot,
+  "dashboards" | "widgets" | "textBlocks" | "viewports"
+>;
+
 export function buildSyncPayload() {
   const { dashboards, widgets, textBlocks, viewports } = useWidgetStore.getState();
 
@@ -59,16 +65,22 @@ async function syncNow() {
   }
 }
 
+export function hasDurableStoreStateChanged(
+  currentState: DurableWidgetStoreSnapshot,
+  previousState: DurableWidgetStoreSnapshot,
+) {
+  return currentState.dashboards !== previousState.dashboards
+    || currentState.widgets !== previousState.widgets
+    || currentState.textBlocks !== previousState.textBlocks
+    || currentState.viewports !== previousState.viewports;
+}
+
 export function scheduleSyncToServer() {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     syncTimeout = null;
     syncNow().catch(() => {});
   }, 2000);
-}
-
-export function syncWidgetToDb() {
-  scheduleSyncToServer();
 }
 
 export async function flushSyncToServer() {
@@ -90,7 +102,6 @@ export function deleteWidgetFromDb(widgetId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: widgetId }),
   }).catch(() => {});
-  scheduleSyncToServer();
 }
 
 export function deleteTextBlockFromDb(textBlockId: string) {
@@ -99,5 +110,4 @@ export function deleteTextBlockFromDb(textBlockId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: textBlockId }),
   }).catch(() => {});
-  scheduleSyncToServer();
 }

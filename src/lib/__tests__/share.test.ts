@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveShareId,
   getPublishedWidgetId,
-  getDashboardStreamId,
-  getTraceStreamId,
+  getSessionStreamId,
 } from "@/lib/share";
 
 describe("deriveShareId", () => {
@@ -27,9 +26,8 @@ describe("deriveShareId", () => {
 });
 
 describe("share naming helpers", () => {
-  it("derives stream and published widget ids from shareId", () => {
-    expect(getDashboardStreamId("shr_abc")).toBe("shr_abc.dashboard");
-    expect(getTraceStreamId("shr_abc")).toBe("shr_abc.trace");
+  it("derives session stream and published widget ids from shareId", () => {
+    expect(getSessionStreamId("shr_abc")).toBe("shr_abc.session");
     expect(getPublishedWidgetId("shr_abc", "widget-1")).toBe(
       "share--shr_abc--widget-1",
     );

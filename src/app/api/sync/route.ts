@@ -1,5 +1,5 @@
 import { syncState, getFullState } from "@/db/widgets";
-import { scheduleLiveDashboardAppend } from "@/lib/publish-dashboard";
+import { scheduleSharedDashboardAppend } from "@/lib/session-stream";
 
 export async function GET() {
   const state = getFullState();
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   syncState({ dashboards: dashboards ?? [], widgets: widgets ?? [], textBlocks: textBlocks ?? [] });
 
   for (const dashboard of dashboards ?? []) {
-    scheduleLiveDashboardAppend(dashboard.id, 0);
+    scheduleSharedDashboardAppend(dashboard.id, 0);
   }
 
   return Response.json({ ok: true });

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DashboardGrid } from "@/components/dashboard-grid";
 import { ChatSidebar } from "@/components/chat-sidebar";
+import { AutoSyncToServer } from "@/components/auto-sync-to-server";
 import { AddMenu } from "@/components/add-menu";
 import { DashboardPicker } from "@/components/dashboard-picker";
 import { ShareDashboardButton } from "@/components/share-dashboard-button";
@@ -29,6 +30,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-900">
+      <AutoSyncToServer />
       <div className="flex flex-col flex-1 min-w-0">
         <header className="flex items-center justify-between gap-4 px-5 py-3">
           <h1 className="min-w-0 shrink-0 text-sm font-medium uppercase tracking-[0.2em]">

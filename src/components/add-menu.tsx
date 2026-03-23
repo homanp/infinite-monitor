@@ -9,7 +9,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useWidgetStore } from "@/store/widget-store";
-import { scheduleSyncToServer } from "@/lib/sync-db";
 
 export function AddMenu() {
   const addWidget = useWidgetStore((s) => s.addWidget);
@@ -34,7 +33,6 @@ export function AddMenu() {
           onClick={() => {
             const id = addWidget();
             setActiveWidget(id);
-            scheduleSyncToServer();
           }}
           className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >
@@ -44,7 +42,6 @@ export function AddMenu() {
         <DropdownMenuItem
           onClick={() => {
             addTextBlock();
-            scheduleSyncToServer();
           }}
           className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >

@@ -17,8 +17,10 @@ import {
 } from "@/db/widgets";
 import { webSearch, type SearchProvider } from "@/lib/web-search";
 import { scanUrls } from "@/lib/brin";
-import { maybeCreateSharedTraceRecorder } from "@/lib/share-trace";
-import { scheduleLiveDashboardAppendForWidget } from "@/lib/publish-dashboard";
+import {
+  maybeCreateSharedSessionRecorder,
+  scheduleSharedDashboardAppendForWidget,
+} from "@/lib/session-stream";
 
 interface McpServerPayload {
   name: string;
@@ -238,8 +240,8 @@ export async function POST(request: Request) {
 
   const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
   const useAnthropic = isAnthropicModel(selectedModel);
-  const traceRecorder = await maybeCreateSharedTraceRecorder(widgetId).catch((err) => {
-    console.error("[share-trace] Failed to initialize recorder:", err);
+  const traceRecorder = await maybeCreateSharedSessionRecorder(widgetId).catch((err) => {
+    console.error("[share-session] Failed to initialize recorder:", err);
     return null;
   });
 
@@ -284,7 +286,7 @@ export async function POST(request: Request) {
         }
       }
 
-      scheduleLiveDashboardAppendForWidget(widgetId);
+      scheduleSharedDashboardAppendForWidget(widgetId);
     },
   };
 
@@ -435,6 +437,8 @@ export async function POST(request: Request) {
       };
 
       try {
+        let runTerminated = false;
+        traceRecorder?.startRun();
         traceRecorder?.record("run-start", "Started widget generation");
 
         for await (const part of result.fullStream) {
@@ -511,6 +515,8 @@ export async function POST(request: Request) {
 
             case "abort":
               traceRecorder?.record("run-abort", "Widget generation was interrupted");
+              traceRecorder?.finish();
+              runTerminated = true;
               send({ type: "abort" });
               break;
 
@@ -519,18 +525,24 @@ export async function POST(request: Request) {
                 "run-error",
                 truncateTraceDetail(`Error: ${String(part.error)}`),
               );
+              traceRecorder?.finish();
+              runTerminated = true;
               send({ type: "error", error: String(part.error) });
               break;
           }
         }
 
-        traceRecorder?.record("run-finished", "Completed widget generation");
-        send({ type: "done" });
+        if (!runTerminated) {
+          traceRecorder?.record("run-finished", "Completed widget generation");
+          traceRecorder?.finish();
+          send({ type: "done" });
+        }
       } catch (err) {
         traceRecorder?.record(
           "run-error",
           truncateTraceDetail(`Error: ${String(err)}`),
         );
+        traceRecorder?.finish();
         send({ type: "error", error: String(err) });
       } finally {
         void traceRecorder?.flush();

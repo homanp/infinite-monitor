@@ -10,8 +10,7 @@ interface ShareInfo {
   dashboardId: string;
   shareId: string;
   shareUrl: string;
-  dashboardStreamId: string;
-  traceStreamId: string;
+  sessionStreamId: string;
   updatedAt: string;
 }
 

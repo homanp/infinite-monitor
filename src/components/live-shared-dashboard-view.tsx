@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, LoaderCircle } from "lucide-react";
 import { SharedDashboardView } from "@/components/shared-dashboard-view";
 import {
-  isDashboardLiveEventV1,
-  type DashboardSharedStateV1,
+  applySharedSessionEvent,
+  buildEmptySharedSessionSnapshot,
+  isSharedSessionEventV1,
+  type SharedSessionSnapshotV1,
 } from "@/lib/share-types";
 
 interface LiveBootstrapPayload {
-  state: DashboardSharedStateV1;
+  snapshot: SharedSessionSnapshotV1;
   nextOffset?: string | null;
 }
 
@@ -18,7 +20,7 @@ export function LiveSharedDashboardView({
 }: {
   shareId: string;
 }) {
-  const [dashboard, setDashboard] = useState<DashboardSharedStateV1 | null>(null);
+  const [snapshot, setSnapshot] = useState<SharedSessionSnapshotV1 | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -31,15 +33,20 @@ export function LiveSharedDashboardView({
 
     const applyLivePayload = (payload: unknown) => {
       const candidates = Array.isArray(payload) ? payload : [payload];
+      const events = candidates.filter(isSharedSessionEventV1);
 
-      for (const candidate of candidates) {
-        if (!isDashboardLiveEventV1(candidate)) {
-          continue;
-        }
-
-        setDashboard(candidate.state);
-        setLiveError(null);
+      if (events.length === 0) {
+        return;
       }
+
+      setSnapshot((previousSnapshot) => {
+        const initialSnapshot = previousSnapshot ?? buildEmptySharedSessionSnapshot(shareId);
+        return events.reduce(
+          (currentSnapshot, event) => applySharedSessionEvent(currentSnapshot, event),
+          initialSnapshot,
+        );
+      });
+      setLiveError(null);
     };
 
     const connectLive = (offset: string) => {
@@ -50,7 +57,7 @@ export function LiveSharedDashboardView({
       nextLiveOffset = offset;
       eventSource?.close();
       eventSource = new EventSource(
-        `/api/share/${shareId}/dashboard/live?offset=${encodeURIComponent(offset)}`,
+        `/api/share/${shareId}/session/live?offset=${encodeURIComponent(offset)}`,
       );
 
       eventSource.addEventListener("data", (event) => {
@@ -84,7 +91,7 @@ export function LiveSharedDashboardView({
 
         eventSource?.close();
         eventSource = null;
-        setLiveError("Live dashboard connection interrupted");
+        setLiveError("Live session connection interrupted");
 
         if (reconnectTimer !== null) {
           return;
@@ -97,16 +104,16 @@ export function LiveSharedDashboardView({
       };
     };
 
-    const bootstrapDashboard = async () => {
+    const bootstrapSession = async () => {
       setLoading(true);
       setBootstrapError(null);
       setLiveError(null);
 
       try {
-        const response = await fetch(`/api/share/${shareId}/dashboard/bootstrap`);
+        const response = await fetch(`/api/share/${shareId}/session/bootstrap`);
         const data = await response.json().catch(() => null);
         if (!response.ok) {
-          throw new Error(data?.error ?? `Live dashboard load failed with status ${response.status}`);
+          throw new Error(data?.error ?? `Shared session load failed with status ${response.status}`);
         }
 
         if (cancelled) {
@@ -114,12 +121,12 @@ export function LiveSharedDashboardView({
         }
 
         const payload = data as LiveBootstrapPayload;
-        setDashboard(payload.state);
+        setSnapshot(payload.snapshot);
         connectLive(payload.nextOffset ?? "now");
       } catch (err) {
         if (!cancelled) {
           setBootstrapError(err instanceof Error ? err.message : String(err));
-          setDashboard(null);
+          setSnapshot(null);
         }
       } finally {
         if (!cancelled) {
@@ -128,7 +135,7 @@ export function LiveSharedDashboardView({
       }
     };
 
-    void bootstrapDashboard();
+    void bootstrapSession();
 
     return () => {
       cancelled = true;
@@ -143,12 +150,12 @@ export function LiveSharedDashboardView({
     return (
       <div className="flex h-screen items-center justify-center gap-2 bg-zinc-900 text-sm text-zinc-500">
         <LoaderCircle className="h-4 w-4 animate-spin" />
-        Loading shared dashboard…
+        Loading shared session…
       </div>
     );
   }
 
-  if (bootstrapError || !dashboard) {
+  if (bootstrapError || !snapshot?.dashboard) {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-zinc-900">
         <header className="border-b border-zinc-800 px-5 py-3">
@@ -162,10 +169,10 @@ export function LiveSharedDashboardView({
               <AlertTriangle className="h-5 w-5 text-amber-300" />
             </div>
             <h1 className="mt-3 text-sm uppercase tracking-[0.18em] text-zinc-100">
-              Shared dashboard unavailable
+              Shared session unavailable
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-zinc-500">
-              This share link does not have any durable dashboard state yet.
+              This share link does not have any durable shared session state yet.
             </p>
             {bootstrapError && (
               <div className="mt-4 break-words text-xs text-zinc-500">{bootstrapError}</div>
@@ -181,12 +188,10 @@ export function LiveSharedDashboardView({
 
   return (
     <div className="relative h-screen">
-      <SharedDashboardView dashboard={dashboard} />
-      {liveError && (
-        <div className="pointer-events-none absolute top-16 right-4 border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-amber-100">
-          {liveError}
-        </div>
-      )}
+      <SharedDashboardView
+        snapshot={snapshot}
+        liveError={liveError}
+      />
     </div>
   );
 }

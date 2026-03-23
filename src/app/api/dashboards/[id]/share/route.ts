@@ -1,10 +1,8 @@
 import { getDashboard } from "@/db/widgets";
-import { appendLiveDashboardState } from "@/lib/publish-dashboard";
-import { ensurePublishedTraceStream } from "@/lib/share-trace";
+import { appendSharedDashboardState } from "@/lib/session-stream";
 import {
   deriveShareId,
-  getDashboardStreamId,
-  getTraceStreamId,
+  getSessionStreamId,
 } from "@/lib/share";
 
 export async function POST(
@@ -21,15 +19,13 @@ export async function POST(
   try {
     const shareId = deriveShareId(id);
     const origin = new URL(request.url).origin;
-    const liveState = await appendLiveDashboardState(id);
-    await ensurePublishedTraceStream(shareId);
+    const liveState = await appendSharedDashboardState(id);
 
     return Response.json({
       dashboardId: id,
       shareId,
       shareUrl: `${origin}/share/${shareId}`,
-      dashboardStreamId: getDashboardStreamId(shareId),
-      traceStreamId: getTraceStreamId(shareId),
+      sessionStreamId: getSessionStreamId(shareId),
       updatedAt: liveState.state.updatedAt,
     });
   } catch (err) {

@@ -1,5 +1,5 @@
 import { getOptionalRiverrunClient } from "@/lib/riverrun";
-import { SHARE_BUCKET, getDashboardStreamId } from "@/lib/share";
+import { getSessionStreamId, SHARE_BUCKET } from "@/lib/share";
 
 export async function GET(
   request: Request,
@@ -14,7 +14,7 @@ export async function GET(
   try {
     const upstream = await riverrun.tailSse(
       SHARE_BUCKET,
-      getDashboardStreamId(shareId),
+      getSessionStreamId(shareId),
       offset,
       request.signal,
     );
