@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useWidgetStore } from "@/store/widget-store";
-import { flushSyncToServer } from "@/lib/sync-db";
 
 export function DashboardPicker() {
   const dashboards = useWidgetStore((s) => s.dashboards);
@@ -83,20 +82,8 @@ export function DashboardPicker() {
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const dashboard = dashboards.find((d) => d.id === id);
-    const widgetIds = dashboard?.widgetIds ?? [];
     removeDashboard(id);
-
-    // Delete widgets and dashboard from the server DB
-    for (const wid of widgetIds) {
-      fetch("/api/widgets", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: wid }),
-      }).catch(() => {});
-    }
-    flushSyncToServer().catch(() => {});
-  }, [removeDashboard, dashboards]);
+  }, [removeDashboard]);
 
   if (dashboards.length === 0) return null;
 

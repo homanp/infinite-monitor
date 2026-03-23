@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type {
   PublishedTraceEventKind,
+  PublishedWidgetSnapshotV1,
   SharedSessionReplayFrameV1,
   SharedSessionStateV1,
 } from "@/lib/share-types";
@@ -56,19 +57,25 @@ function getTraceKindClassName(kind: PublishedTraceEventKind) {
 }
 
 export function SharedTracePanel({
+  widgets,
+  selectedWidgetId,
   liveSession,
   replaySession,
   replayFrames,
   replayFrameIndex,
   liveError,
   onReplayFrameIndexChange,
+  onSelectWidgetId,
 }: {
+  widgets: PublishedWidgetSnapshotV1[];
+  selectedWidgetId: string | null;
   liveSession: SharedSessionStateV1;
   replaySession: SharedSessionStateV1;
   replayFrames: SharedSessionReplayFrameV1[];
   replayFrameIndex: number;
   liveError?: string | null;
   onReplayFrameIndexChange: (nextReplayFrameIndex: number) => void;
+  onSelectWidgetId: (publishedWidgetId: string | null) => void;
 }) {
   const replayStepCount = replayFrames.length > 0 ? replayFrames.length - 1 : 0;
   const [playing, setPlaying] = useState(false);
@@ -208,6 +215,41 @@ export function SharedTracePanel({
             </div>
 
             <div className="mt-3">
+              {widgets.length > 1 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlaying(false);
+                      onSelectWidgetId(null);
+                    }}
+                    className={`border px-2 py-1 text-[10px] uppercase tracking-[0.18em] transition-colors ${
+                      selectedWidgetId === null
+                        ? "border-teal-500/40 bg-teal-500/10 text-teal-100"
+                        : "border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    }`}
+                  >
+                    All Widgets
+                  </button>
+                  {widgets.map((widget) => (
+                    <button
+                      key={widget.publishedWidgetId}
+                      type="button"
+                      onClick={() => {
+                        setPlaying(false);
+                        onSelectWidgetId(widget.publishedWidgetId);
+                      }}
+                      className={`border px-2 py-1 text-[10px] uppercase tracking-[0.18em] transition-colors ${
+                        selectedWidgetId === widget.publishedWidgetId
+                          ? "border-teal-500/40 bg-teal-500/10 text-teal-100"
+                          : "border-zinc-700 bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                      }`}
+                    >
+                      {widget.title}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
                 type="range"
                 min={0}

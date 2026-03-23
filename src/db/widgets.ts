@@ -4,6 +4,8 @@ import {
   isCanvasViewportSnapshot,
   normalizeCanvasViewport,
 } from "@/lib/canvas-viewport";
+import { isPublishedWidgetId } from "@/lib/share";
+import type { SyncPayload } from "@/lib/sync-db";
 
 const { widgets, dashboards, textBlocks } = schema;
 
@@ -208,31 +210,29 @@ export function deleteTextBlock(id: string) {
 
 // ── Bulk sync (for local-first push/pull) ──
 
-export function syncState(data: {
-  dashboards: Array<{
-    id: string;
-    title: string;
-    widgetIds: string[];
-    textBlockIds?: string[];
-    createdAt: number;
-    viewport?: unknown;
-  }>;
-  widgets: Array<{
-    id: string;
-    title: string;
-    description: string;
-    code: string | null;
-    files?: Record<string, string>;
-    layout: unknown;
-    messages: unknown[];
-  }>;
-  textBlocks?: Array<{
-    id: string;
-    text: string;
-    fontSize: number;
-    layout: unknown;
-  }>;
-}) {
+export function syncState(data: SyncPayload) {
+  const nextDashboardIds = new Set(data.dashboards.map((dashboard) => dashboard.id));
+  const nextWidgetIds = new Set(data.widgets.map((widget) => widget.id));
+  const nextTextBlockIds = new Set((data.textBlocks ?? []).map((textBlock) => textBlock.id));
+
+  for (const dashboard of getAllDashboards()) {
+    if (!nextDashboardIds.has(dashboard.id)) {
+      deleteDashboard(dashboard.id);
+    }
+  }
+
+  for (const widget of getAllWidgets()) {
+    if (!isPublishedWidgetId(widget.id) && !nextWidgetIds.has(widget.id)) {
+      deleteWidget(widget.id);
+    }
+  }
+
+  for (const textBlock of getAllTextBlocks()) {
+    if (!nextTextBlockIds.has(textBlock.id)) {
+      deleteTextBlock(textBlock.id);
+    }
+  }
+
   for (const d of data.dashboards) {
     upsertDashboard({
       id: d.id,

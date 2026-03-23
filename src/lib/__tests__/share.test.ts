@@ -3,6 +3,7 @@ import {
   deriveShareId,
   getPublishedWidgetId,
   getSessionStreamId,
+  isPublishedWidgetId,
 } from "@/lib/share";
 
 describe("deriveShareId", () => {
@@ -31,5 +32,10 @@ describe("share naming helpers", () => {
     expect(getPublishedWidgetId("shr_abc", "widget-1")).toBe(
       "share--shr_abc--widget-1",
     );
+  });
+
+  it("recognizes published widget ids", () => {
+    expect(isPublishedWidgetId("share--shr_abc--widget-1")).toBe(true);
+    expect(isPublishedWidgetId("widget-1")).toBe(false);
   });
 });

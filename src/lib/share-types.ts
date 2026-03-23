@@ -3,6 +3,8 @@ import {
   type CanvasViewportSnapshot,
 } from "@/lib/canvas-viewport";
 
+export const MAX_SHARED_TRACE_EVENTS = 500;
+
 export interface PublishedCanvasLayout {
   x: number;
   y: number;
@@ -170,7 +172,7 @@ export function mergeSharedTraceEvents(
     shareId: currentTrace.shareId,
     updatedAt: lastEvent.at,
     nextOffset,
-    events: [...currentTrace.events, ...events].slice(-500),
+    events: [...currentTrace.events, ...events].slice(-MAX_SHARED_TRACE_EVENTS),
   };
 }
 
@@ -258,7 +260,7 @@ function findLastEventIndex(
 
 export function trimSharedSessionReplayEvents(
   events: SharedSessionEventV1[],
-  maxTraceEvents = 500,
+  maxTraceEvents = MAX_SHARED_TRACE_EVENTS,
 ) {
   if (events.length === 0) {
     return events;
@@ -285,13 +287,15 @@ export function trimSharedSessionReplayEvents(
   }
 
   const firstTraceIndexToKeep = traceIndices[Math.max(0, traceIndices.length - maxTraceEvents)];
-  const latestRunStartIndex = findLastEventIndex(
+  const replayAnchorTraceIndex = firstTraceIndexToKeep ?? traceIndices[0] ?? 0;
+  const earliestRunStartIndex = findLastEventIndex(
     events,
     (event) => event.kind === "trace.event" && event.event.kind === "run-start",
+    replayAnchorTraceIndex + 1,
   );
-  const replayAnchorIndex = latestRunStartIndex >= 0
-    ? latestRunStartIndex
-    : firstTraceIndexToKeep;
+  const replayAnchorIndex = earliestRunStartIndex >= 0
+    ? earliestRunStartIndex
+    : replayAnchorTraceIndex;
   const lastDashboardBeforeAnchor = findLastEventIndex(
     events,
     (event) => event.kind === "dashboard.state",
@@ -317,9 +321,16 @@ export function trimSharedSessionReplayEvents(
 
 export function buildSharedSessionReplayFrames(
   replayEvents: SharedSessionEventV1[],
+  publishedWidgetId?: string,
 ): SharedSessionReplayFrameV1[] {
-  const traceIndices = replayEvents.flatMap((event, index) => {
+  const allTraceIndices = replayEvents.flatMap((event, index) => {
     return event.kind === "trace.event" ? [index] : [];
+  });
+  const traceIndices = replayEvents.flatMap((event, index) => {
+    return event.kind === "trace.event"
+      && (publishedWidgetId === undefined || event.event.publishedWidgetId === publishedWidgetId)
+      ? [index]
+      : [];
   });
 
   if (traceIndices.length === 0) {
@@ -339,9 +350,10 @@ export function buildSharedSessionReplayFrames(
       continue;
     }
 
+    const nextTraceIndex = allTraceIndices.find((index) => index > eventIndex);
     frames.push({
       traceEvent: event.event,
-      endEventIndex: traceIndices[traceIndex + 1] ?? replayEvents.length,
+      endEventIndex: nextTraceIndex ?? replayEvents.length,
     });
   }
 
@@ -352,8 +364,9 @@ export function buildSharedSessionReplaySnapshot(
   shareId: string,
   replayEvents: SharedSessionEventV1[],
   frameIndex: number,
+  publishedWidgetId?: string,
 ): SharedSessionSnapshotV1 {
-  const replayFrames = buildSharedSessionReplayFrames(replayEvents);
+  const replayFrames = buildSharedSessionReplayFrames(replayEvents, publishedWidgetId);
   if (replayFrames.length === 0) {
     return {
       ...buildEmptySharedSessionSnapshot(shareId),
@@ -372,6 +385,53 @@ export function buildSharedSessionReplaySnapshot(
   return {
     ...snapshot,
     replayEvents,
+  };
+}
+
+export function mergeFocusedWidgetReplayDashboard(
+  liveDashboard: DashboardSharedStateV1 | null,
+  replayDashboard: DashboardSharedStateV1 | null,
+  focusedWidgetId: string | null,
+): DashboardSharedStateV1 | null {
+  if (!focusedWidgetId) {
+    return replayDashboard ?? liveDashboard;
+  }
+
+  if (!liveDashboard) {
+    return replayDashboard;
+  }
+
+  if (!replayDashboard) {
+    return liveDashboard;
+  }
+
+  const replayWidget = replayDashboard.widgets.find(
+    (widget) => widget.publishedWidgetId === focusedWidgetId,
+  );
+
+  if (!replayWidget) {
+    return liveDashboard;
+  }
+
+  const hasLiveWidget = liveDashboard.widgets.some(
+    (widget) => widget.publishedWidgetId === focusedWidgetId,
+  );
+
+  return {
+    ...liveDashboard,
+    widgets: hasLiveWidget
+      ? liveDashboard.widgets.map((widget) =>
+        widget.publishedWidgetId === focusedWidgetId
+          ? {
+              ...widget,
+              title: replayWidget.title,
+              description: replayWidget.description,
+              revision: replayWidget.revision,
+              files: replayWidget.files,
+            }
+          : widget
+      )
+      : [...liveDashboard.widgets, replayWidget],
   };
 }
 

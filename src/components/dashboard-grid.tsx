@@ -5,7 +5,6 @@ import { LayoutGrid, TrendingUp, Shield, Globe } from "lucide-react";
 import { useWidgetStore } from "@/store/widget-store";
 import { WidgetCard } from "@/components/widget-card";
 import { TextBlockItem } from "@/components/text-block-item";
-import { deleteWidgetFromDb, deleteTextBlockFromDb } from "@/lib/sync-db";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AddMenu } from "@/components/add-menu";
 import { CELL_W, CELL_H, MARGIN, InfiniteCanvas } from "@/components/infinite-canvas";
@@ -213,7 +212,6 @@ export function DashboardGrid() {
   const handleRemove = useCallback(
     (id: string) => {
       removeWidget(id);
-      deleteWidgetFromDb(id);
     },
     [removeWidget]
   );
@@ -249,7 +247,6 @@ export function DashboardGrid() {
   const handleRemoveTextBlock = useCallback(
     (id: string) => {
       removeTextBlock(id);
-      deleteTextBlockFromDb(id);
     },
     [removeTextBlock]
   );

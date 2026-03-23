@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { DEFAULT_CANVAS_VIEWPORT } from "@/lib/canvas-viewport";
+import {
+  configureSyncPayloadProvider,
+  scheduleSyncToServer,
+  type SyncPayload,
+  type SyncUrgency,
+} from "@/lib/sync-db";
 
 export interface MessageAttachment {
   name: string;
@@ -73,6 +80,7 @@ interface WidgetStore {
 
   addWidget: (title?: string, description?: string) => string;
   addMessage: (widgetId: string, message: WidgetMessage) => void;
+  updateMessageContent: (widgetId: string, messageId: string, content: string) => void;
   renameWidget: (id: string, title: string) => void;
   setWidgetCode: (widgetId: string, code: string) => void;
   setWidgetFile: (widgetId: string, path: string, content: string) => void;
@@ -161,43 +169,102 @@ export function getNextWidgetInsertionY(
   return Number.isFinite(topY) ? topY - newHeight : 0;
 }
 
+type DurableStoreState = Pick<
+  WidgetStore,
+  "dashboards" | "widgets" | "textBlocks" | "viewports"
+>;
+
+type WidgetStoreStateUpdate =
+  | Partial<WidgetStore>
+  | ((state: WidgetStore) => Partial<WidgetStore>);
+
+type WidgetStorePartialSetter = (nextState: WidgetStoreStateUpdate) => void;
+
+export function buildSyncPayloadFromStoreState(
+  state: DurableStoreState,
+): SyncPayload {
+  return {
+    dashboards: state.dashboards.map((dashboard) => ({
+      id: dashboard.id,
+      title: dashboard.title,
+      widgetIds: dashboard.widgetIds,
+      textBlockIds: dashboard.textBlockIds ?? [],
+      createdAt: dashboard.createdAt,
+      viewport: state.viewports[dashboard.id] ?? DEFAULT_CANVAS_VIEWPORT,
+    })),
+    widgets: state.widgets.map((widget) => ({
+      id: widget.id,
+      title: widget.title,
+      description: widget.description,
+      code: widget.code,
+      files: widget.files,
+      layout: widget.layout,
+      messages: widget.messages,
+    })),
+    textBlocks: state.textBlocks.map((textBlock) => ({
+      id: textBlock.id,
+      text: textBlock.text,
+      fontSize: textBlock.fontSize,
+      layout: textBlock.layout,
+    })),
+  };
+}
+
+function scheduleDurableStateSync(urgency: SyncUrgency) {
+  if (typeof window !== "undefined") {
+    scheduleSyncToServer(urgency);
+  }
+}
+
 export const useWidgetStore = create<WidgetStore>()(
   persist(
-    (set, get) => ({
-      dashboards: [],
-      activeDashboardId: null,
-      widgets: [],
-      textBlocks: [],
-      activeWidgetId: null,
-      streamingWidgetIds: [],
-      currentActions: {},
-      reasoningStreamingIds: [],
-      viewports: {},
+    (set, get) => {
+      const setPartialState = set as unknown as WidgetStorePartialSetter;
+      const setDurableState = (
+        nextState: WidgetStoreStateUpdate,
+        urgency: SyncUrgency = "background",
+      ) => {
+        setPartialState(nextState);
+        scheduleDurableStateSync(urgency);
+      };
+
+      return {
+        dashboards: [],
+        activeDashboardId: null,
+        widgets: [],
+        textBlocks: [],
+        activeWidgetId: null,
+        streamingWidgetIds: [],
+        currentActions: {},
+        reasoningStreamingIds: [],
+        viewports: {},
 
       addDashboard: (title = "Dashboard") => {
         const id = generateId("dash");
-        set((state) => ({
+        setDurableState((state) => ({
           dashboards: [...state.dashboards, { id, title, widgetIds: [], textBlockIds: [], createdAt: Date.now() }],
           activeDashboardId: id,
-        }));
+        }), "interactive");
         return id;
       },
 
       renameDashboard: (id, title) => {
-        set((state) => ({
+        setDurableState((state) => ({
           dashboards: state.dashboards.map((d) =>
             d.id === id ? { ...d, title } : d
           ),
-        }));
+        }), "interactive");
       },
 
       removeDashboard: (id) => {
         const dashboard = get().dashboards.find((d) => d.id === id);
         const widgetIds = dashboard?.widgetIds ?? [];
         const textBlockIds = dashboard?.textBlockIds ?? [];
-        set((state) => {
+        setDurableState((state) => {
           const nextActions = { ...state.currentActions };
+          const nextViewports = { ...state.viewports };
           for (const wid of widgetIds) delete nextActions[wid];
+          delete nextViewports[id];
           return {
             dashboards: state.dashboards.filter((d) => d.id !== id),
             widgets: state.widgets.filter((w) => !widgetIds.includes(w.id)),
@@ -207,8 +274,9 @@ export const useWidgetStore = create<WidgetStore>()(
             streamingWidgetIds: state.streamingWidgetIds.filter((wid) => !widgetIds.includes(wid)),
             reasoningStreamingIds: state.reasoningStreamingIds.filter((wid) => !widgetIds.includes(wid)),
             currentActions: nextActions,
+            viewports: nextViewports,
           };
-        });
+        }, "interactive");
       },
 
       setActiveDashboard: (id) => {
@@ -221,10 +289,10 @@ export const useWidgetStore = create<WidgetStore>()(
 
         if (!dashId || !dashboards.find((d) => d.id === dashId)) {
           dashId = generateId("dash");
-          set((state) => ({
+          setDurableState((state) => ({
             dashboards: [...state.dashboards, { id: dashId!, title: "Dashboard", widgetIds: [], textBlockIds: [], createdAt: Date.now() }],
             activeDashboardId: dashId,
-          }));
+          }), "interactive");
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
@@ -254,17 +322,17 @@ export const useWidgetStore = create<WidgetStore>()(
           },
         };
 
-        set((state) => ({
+        setDurableState((state) => ({
           widgets: [...state.widgets, widget],
           dashboards: state.dashboards.map((d) =>
             d.id === dashId ? { ...d, widgetIds: [...d.widgetIds, id] } : d
           ),
-        }));
+        }), "interactive");
         return id;
       },
 
       addMessage: (widgetId, message) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === widgetId
               ? { ...w, messages: [...w.messages, message] }
@@ -273,16 +341,31 @@ export const useWidgetStore = create<WidgetStore>()(
         });
       },
 
-      renameWidget: (id, title) => {
-        set({
+      updateMessageContent: (widgetId, messageId, content) => {
+        setDurableState({
           widgets: get().widgets.map((w) =>
-            w.id === id ? { ...w, title } : w
+            w.id === widgetId
+              ? {
+                  ...w,
+                  messages: w.messages.map((m) =>
+                    m.id === messageId ? { ...m, content } : m
+                  ),
+                }
+              : w
           ),
         });
       },
 
+      renameWidget: (id, title) => {
+        setDurableState({
+          widgets: get().widgets.map((w) =>
+            w.id === id ? { ...w, title } : w
+          ),
+        }, "interactive");
+      },
+
       setWidgetCode: (widgetId, code) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === widgetId
               ? { ...w, code, files: { ...w.files, "src/App.tsx": code } }
@@ -292,7 +375,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       setWidgetFile: (widgetId, path, content) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === widgetId
               ? { ...w, files: { ...w.files, [path]: content } }
@@ -302,7 +385,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       deleteWidgetFile: (widgetId, path) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) => {
             if (w.id !== widgetId) return w;
             const files = { ...w.files };
@@ -313,7 +396,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       clearWidgetCode: (widgetId) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === widgetId ? { ...w, code: null, iframeVersion: 0 } : w
           ),
@@ -351,7 +434,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       appendReasoningToMessage: (widgetId, messageId, text) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === widgetId
               ? {
@@ -376,7 +459,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       removeWidget: (id) => {
-        set((state) => {
+        setDurableState((state) => {
           const nextActions = { ...state.currentActions };
           delete nextActions[id];
           return {
@@ -391,7 +474,7 @@ export const useWidgetStore = create<WidgetStore>()(
             reasoningStreamingIds: state.reasoningStreamingIds.filter((wid) => wid !== id),
             currentActions: nextActions,
           };
-        });
+        }, "interactive");
       },
 
       setActiveWidget: (id) => {
@@ -399,17 +482,17 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       updateWidgetLayout: (id, layout) => {
-        set({
+        setDurableState({
           widgets: get().widgets.map((w) =>
             w.id === id ? { ...w, layout: { ...w.layout, ...layout } } : w
           ),
-        });
+        }, "interactive");
       },
 
       setViewport: (dashboardId, viewport) => {
-        set((state) => ({
+        setDurableState((state) => ({
           viewports: { ...state.viewports, [dashboardId]: viewport },
-        }));
+        }), "interactive");
       },
 
       applyTemplate: (template) => {
@@ -418,10 +501,10 @@ export const useWidgetStore = create<WidgetStore>()(
 
         if (!dashId || !dashboards.find((d) => d.id === dashId)) {
           dashId = generateId("dash");
-          set((state) => ({
+          setDurableState((state) => ({
             dashboards: [...state.dashboards, { id: dashId!, title: "Dashboard", widgetIds: [], textBlockIds: [], createdAt: Date.now() }],
             activeDashboardId: dashId,
-          }));
+          }), "interactive");
         }
 
         const newWidgets: Widget[] = template.widgets.map((tw) => {
@@ -445,12 +528,12 @@ export const useWidgetStore = create<WidgetStore>()(
           };
         });
 
-        set((state) => ({
+        setDurableState((state) => ({
           widgets: [...state.widgets, ...newWidgets],
           dashboards: state.dashboards.map((d) =>
             d.id === dashId ? { ...d, widgetIds: [...d.widgetIds, ...newWidgets.map((w) => w.id)] } : d
           ),
-        }));
+        }), "interactive");
 
         fetch("/api/widgets/bootstrap", {
           method: "POST",
@@ -473,10 +556,10 @@ export const useWidgetStore = create<WidgetStore>()(
 
         if (!dashId || !dashboards.find((d) => d.id === dashId)) {
           dashId = generateId("dash");
-          set((state) => ({
+          setDurableState((state) => ({
             dashboards: [...state.dashboards, { id: dashId!, title: "Dashboard", widgetIds: [], textBlockIds: [], createdAt: Date.now() }],
             activeDashboardId: dashId,
-          }));
+          }), "interactive");
         }
 
         const dashboard = get().dashboards.find((d) => d.id === dashId);
@@ -498,50 +581,51 @@ export const useWidgetStore = create<WidgetStore>()(
             dashboard?.textBlockIds ?? [],
             newHeight,
           );
-          set((state) => ({
+          setDurableState((state) => ({
             widgets: shifted.widgets,
             textBlocks: [...shifted.textBlocks, block],
             dashboards: state.dashboards.map((d) =>
               d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
             ),
-          }));
+          }), "interactive");
         } else {
-          set((state) => ({
+          setDurableState((state) => ({
             textBlocks: [...state.textBlocks, block],
             dashboards: state.dashboards.map((d) =>
               d.id === dashId ? { ...d, textBlockIds: [...(d.textBlockIds ?? []), id] } : d
             ),
-          }));
+          }), "interactive");
         }
         return id;
       },
 
       updateTextBlock: (id, updates) => {
-        set((state) => ({
+        setDurableState((state) => ({
           textBlocks: state.textBlocks.map((tb) =>
             tb.id === id ? { ...tb, ...updates } : tb
           ),
-        }));
+        }), "interactive");
       },
 
       updateTextBlockLayout: (id, layout) => {
-        set((state) => ({
+        setDurableState((state) => ({
           textBlocks: state.textBlocks.map((tb) =>
             tb.id === id ? { ...tb, layout: { ...tb.layout, ...layout } } : tb
           ),
-        }));
+        }), "interactive");
       },
 
       removeTextBlock: (id) => {
-        set((state) => ({
+        setDurableState((state) => ({
           textBlocks: state.textBlocks.filter((tb) => tb.id !== id),
           dashboards: state.dashboards.map((d) => ({
             ...d,
             textBlockIds: (d.textBlockIds ?? []).filter((tbId) => tbId !== id),
           })),
-        }));
+        }), "interactive");
       },
-    }),
+      };
+    },
     {
       name: "infinite-monitor-widgets",
       merge: (persisted, current) => {
@@ -611,3 +695,5 @@ export const useWidgetStore = create<WidgetStore>()(
     }
   )
 );
+
+configureSyncPayloadProvider(() => buildSyncPayloadFromStoreState(useWidgetStore.getState()));

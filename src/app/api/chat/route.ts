@@ -545,7 +545,7 @@ export async function POST(request: Request) {
         traceRecorder?.finish();
         send({ type: "error", error: String(err) });
       } finally {
-        void traceRecorder?.flush();
+        await traceRecorder?.flush();
         for (const client of mcpClients) {
           client.close().catch(() => {});
         }

@@ -25,3 +25,7 @@ export function getSessionStreamId(shareId: string) {
 export function getPublishedWidgetId(shareId: string, sourceWidgetId: string) {
   return `share--${shareId}--${sourceWidgetId}`;
 }
+
+export function isPublishedWidgetId(widgetId: string) {
+  return widgetId.startsWith("share--shr_");
+}

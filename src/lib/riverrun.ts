@@ -290,10 +290,6 @@ export function getRiverrunBaseUrl() {
   return process.env.RIVERRUN_BASE_URL?.trim() || DEFAULT_RIVERRUN_BASE_URL;
 }
 
-export function getOptionalRiverrunClient() {
+export function getRiverrunClient() {
   return createRiverrunClient(getRiverrunBaseUrl());
-}
-
-export function getRequiredRiverrunClient() {
-  return getOptionalRiverrunClient();
 }

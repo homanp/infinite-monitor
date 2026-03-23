@@ -144,7 +144,7 @@ export function ShareDashboardButton() {
             </div>
           </div>
 
-            <div className="mt-3 border border-zinc-700 bg-zinc-900/60 p-2">
+          <div className="mt-3 border border-zinc-700 bg-zinc-900/60 p-2">
             {loading ? (
               <div className="text-xs text-zinc-500">Syncing live share…</div>
             ) : shareInfo ? (

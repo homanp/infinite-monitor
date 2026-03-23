@@ -1,4 +1,4 @@
-import { getOptionalRiverrunClient } from "@/lib/riverrun";
+import { getRiverrunClient } from "@/lib/riverrun";
 import { getSessionStreamId, SHARE_BUCKET } from "@/lib/share";
 
 export async function GET(
@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ shareId: string }> },
 ) {
   const { shareId } = await params;
-  const riverrun = getOptionalRiverrunClient();
+  const riverrun = getRiverrunClient();
 
   const url = new URL(request.url);
   const offset = url.searchParams.get("offset") ?? "now";

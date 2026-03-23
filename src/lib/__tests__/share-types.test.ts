@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSharedSessionReplayFrames,
   buildSharedSessionReplaySnapshot,
+  mergeFocusedWidgetReplayDashboard,
   trimSharedSessionReplayEvents,
   type DashboardSharedStateV1,
   type PublishedTraceEventV1,
@@ -15,9 +16,33 @@ import {
 const SHARE_ID = "shr_test";
 const DASHBOARD_ID = "dash-1";
 const PUBLISHED_WIDGET_ID = "share--shr_test--widget-1";
+const SECOND_PUBLISHED_WIDGET_ID = "share--shr_test--widget-2";
 
 function buildDashboardState(
   widgetTitle: string,
+  at: string,
+): DashboardSharedStateV1 {
+  return buildDashboardStateWithTitles([widgetTitle], at);
+}
+
+function buildDashboardStateWithTitles(
+  widgetTitles: string[],
+  at: string,
+): DashboardSharedStateV1 {
+  return buildDashboardStateWithWidgets(
+    widgetTitles.map((title) => ({ title })),
+    at,
+  );
+}
+
+function buildDashboardStateWithWidgets(
+  widgets: Array<{
+    title: string;
+    description?: string;
+    layout?: DashboardSharedStateV1["widgets"][number]["layout"];
+    revision?: string;
+    files?: Record<string, string>;
+  }>,
   at: string,
 ): DashboardSharedStateV1 {
   return {
@@ -28,17 +53,19 @@ function buildDashboardState(
     updatedAt: at,
     viewport: { panX: 0, panY: 0, zoom: 1 },
     textBlocks: [],
-    widgets: [{
-      sourceWidgetId: "widget-1",
-      publishedWidgetId: PUBLISHED_WIDGET_ID,
-      revision: "rev-1",
-      title: widgetTitle,
-      description: "",
-      layout: { x: 0, y: 0, w: 4, h: 3 },
-      files: {
+    widgets: widgets.map((widget, index) => ({
+      sourceWidgetId: `widget-${index + 1}`,
+      publishedWidgetId: index === 0
+        ? PUBLISHED_WIDGET_ID
+        : SECOND_PUBLISHED_WIDGET_ID,
+      revision: widget.revision ?? `rev-${index + 1}`,
+      title: widget.title,
+      description: widget.description ?? "",
+      layout: widget.layout ?? { x: index * 4, y: 0, w: 4, h: 3 },
+      files: widget.files ?? {
         "src/App.tsx": "export default function App() { return null; }",
       },
-    }],
+    })),
   };
 }
 
@@ -92,6 +119,7 @@ function buildTraceEvent(
   kind: PublishedTraceEventV1["kind"],
   at: string,
   detail: string,
+  overrides: Partial<Pick<PublishedTraceEventV1, "publishedWidgetId" | "widgetTitle">> = {},
 ): SharedTraceEventEnvelopeV1 {
   return {
     version: "v1",
@@ -103,8 +131,8 @@ function buildTraceEvent(
       id,
       runId: "run-1",
       shareId: SHARE_ID,
-      publishedWidgetId: PUBLISHED_WIDGET_ID,
-      widgetTitle: "Clock",
+      publishedWidgetId: overrides.publishedWidgetId ?? PUBLISHED_WIDGET_ID,
+      widgetTitle: overrides.widgetTitle ?? "Clock",
       kind,
       at,
       detail,
@@ -113,42 +141,89 @@ function buildTraceEvent(
 }
 
 describe("shared session replay history", () => {
-  it("keeps the latest run with the dashboard baseline that precedes it", () => {
-    const olderRunEvents: SharedSessionEventV1[] = [
-      buildDashboardEvent("Untitled", "2026-03-23T11:55:00.000Z", "hash-old-baseline"),
+  it("keeps multiple widget runs inside the replay window", () => {
+    const replayEvents: SharedSessionEventV1[] = [
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:00.000Z",
+        stateHash: "hash-baseline",
+        state: buildDashboardStateWithTitles(
+          ["Untitled Clock", "Untitled Weather"],
+          "2026-03-23T11:55:00.000Z",
+        ),
+      },
       buildTraceEvent(
-        "evt-old-start",
+        "evt-clock-start",
         "run-start",
         "2026-03-23T11:55:10.000Z",
-        "Started older run",
-      ),
-      buildDashboardEvent("Weather", "2026-03-23T11:55:20.000Z", "hash-old-result"),
-    ];
-
-    const latestRunEvents: SharedSessionEventV1[] = [
-      buildDashboardEvent("Untitled", "2026-03-23T12:00:00.000Z", "hash-new-baseline"),
-      buildSessionEvent("2026-03-23T12:00:01.000Z", {
-        activeWidgetId: PUBLISHED_WIDGET_ID,
-        streamingWidgetIds: [PUBLISHED_WIDGET_ID],
-        currentActions: {
-          [PUBLISHED_WIDGET_ID]: "Generating widget",
+        "Started clock run",
+        {
+          publishedWidgetId: PUBLISHED_WIDGET_ID,
+          widgetTitle: "Clock",
         },
-      }),
+      ),
       buildTraceEvent(
-        "evt-new-start",
+        "evt-clock-finished",
+        "run-finished",
+        "2026-03-23T11:55:20.000Z",
+        "Finished clock run",
+        {
+          publishedWidgetId: PUBLISHED_WIDGET_ID,
+          widgetTitle: "Clock",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:30.000Z",
+        stateHash: "hash-after-clock",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "Untitled Weather"],
+          "2026-03-23T11:55:30.000Z",
+        ),
+      },
+      buildTraceEvent(
+        "evt-weather-start",
         "run-start",
         "2026-03-23T12:00:02.000Z",
-        "Started latest run",
+        "Started weather run",
+        {
+          publishedWidgetId: SECOND_PUBLISHED_WIDGET_ID,
+          widgetTitle: "Weather",
+        },
       ),
-      buildDashboardEvent("Current Time", "2026-03-23T12:00:05.000Z", "hash-new-result"),
+      buildTraceEvent(
+        "evt-weather-finished",
+        "run-finished",
+        "2026-03-23T12:00:04.000Z",
+        "Finished weather run",
+        {
+          publishedWidgetId: SECOND_PUBLISHED_WIDGET_ID,
+          widgetTitle: "Weather",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T12:00:05.000Z",
+        stateHash: "hash-after-weather",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "San Francisco Weather"],
+          "2026-03-23T12:00:05.000Z",
+        ),
+      },
     ];
 
-    const trimmed = trimSharedSessionReplayEvents([
-      ...olderRunEvents,
-      ...latestRunEvents,
-    ]);
+    const trimmed = trimSharedSessionReplayEvents(replayEvents);
 
-    expect(trimmed).toEqual(latestRunEvents);
+    expect(trimmed).toEqual(replayEvents);
   });
 
   it("reconstructs the dashboard from the replay baseline for late viewers", () => {
@@ -177,5 +252,239 @@ describe("shared session replay history", () => {
     expect(replayFrames).toHaveLength(2);
     expect(baselineSnapshot.dashboard?.widgets[0]?.title).toBe("Untitled");
     expect(latestSnapshot.dashboard?.widgets[0]?.title).toBe("Current Time");
+  });
+
+  it("replays sequential widget runs without dropping earlier widgets", () => {
+    const replayEvents: SharedSessionEventV1[] = [
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:00.000Z",
+        stateHash: "hash-multi-baseline",
+        state: buildDashboardStateWithTitles(
+          ["Untitled Clock", "Untitled Weather"],
+          "2026-03-23T11:55:00.000Z",
+        ),
+      },
+      buildTraceEvent(
+        "evt-clock-start",
+        "run-start",
+        "2026-03-23T11:55:10.000Z",
+        "Started clock run",
+        {
+          publishedWidgetId: PUBLISHED_WIDGET_ID,
+          widgetTitle: "Clock",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:30.000Z",
+        stateHash: "hash-multi-after-clock",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "Untitled Weather"],
+          "2026-03-23T11:55:30.000Z",
+        ),
+      },
+      buildTraceEvent(
+        "evt-weather-start",
+        "run-start",
+        "2026-03-23T12:00:02.000Z",
+        "Started weather run",
+        {
+          publishedWidgetId: SECOND_PUBLISHED_WIDGET_ID,
+          widgetTitle: "Weather",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T12:00:05.000Z",
+        stateHash: "hash-multi-after-weather",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "San Francisco Weather"],
+          "2026-03-23T12:00:05.000Z",
+        ),
+      },
+    ];
+
+    const replayFrames = buildSharedSessionReplayFrames(replayEvents);
+    const baselineSnapshot = buildSharedSessionReplaySnapshot(SHARE_ID, replayEvents, 0);
+    const afterClockSnapshot = buildSharedSessionReplaySnapshot(SHARE_ID, replayEvents, 1);
+    const afterWeatherSnapshot = buildSharedSessionReplaySnapshot(SHARE_ID, replayEvents, 2);
+
+    expect(replayFrames).toHaveLength(3);
+    expect(baselineSnapshot.dashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Untitled Clock",
+      "Untitled Weather",
+    ]);
+    expect(afterClockSnapshot.dashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Current Time",
+      "Untitled Weather",
+    ]);
+    expect(afterWeatherSnapshot.dashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Current Time",
+      "San Francisco Weather",
+    ]);
+  });
+
+  it("builds widget-specific replay snapshots when a widget is selected", () => {
+    const replayEvents: SharedSessionEventV1[] = [
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:00.000Z",
+        stateHash: "hash-widget-filter-baseline",
+        state: buildDashboardStateWithTitles(
+          ["Untitled Clock", "Untitled Weather"],
+          "2026-03-23T11:55:00.000Z",
+        ),
+      },
+      buildTraceEvent(
+        "evt-clock-start",
+        "run-start",
+        "2026-03-23T11:55:10.000Z",
+        "Started clock run",
+        {
+          publishedWidgetId: PUBLISHED_WIDGET_ID,
+          widgetTitle: "Clock",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T11:55:30.000Z",
+        stateHash: "hash-widget-filter-after-clock",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "Untitled Weather"],
+          "2026-03-23T11:55:30.000Z",
+        ),
+      },
+      buildTraceEvent(
+        "evt-weather-start",
+        "run-start",
+        "2026-03-23T12:00:02.000Z",
+        "Started weather run",
+        {
+          publishedWidgetId: SECOND_PUBLISHED_WIDGET_ID,
+          widgetTitle: "Weather",
+        },
+      ),
+      {
+        version: "v1",
+        kind: "dashboard.state",
+        shareId: SHARE_ID,
+        dashboardId: DASHBOARD_ID,
+        at: "2026-03-23T12:00:05.000Z",
+        stateHash: "hash-widget-filter-after-weather",
+        state: buildDashboardStateWithTitles(
+          ["Current Time", "San Francisco Weather"],
+          "2026-03-23T12:00:05.000Z",
+        ),
+      },
+    ];
+
+    const clockFrames = buildSharedSessionReplayFrames(replayEvents, PUBLISHED_WIDGET_ID);
+    const weatherFrames = buildSharedSessionReplayFrames(replayEvents, SECOND_PUBLISHED_WIDGET_ID);
+    const clockSnapshot = buildSharedSessionReplaySnapshot(
+      SHARE_ID,
+      replayEvents,
+      1,
+      PUBLISHED_WIDGET_ID,
+    );
+    const weatherSnapshot = buildSharedSessionReplaySnapshot(
+      SHARE_ID,
+      replayEvents,
+      1,
+      SECOND_PUBLISHED_WIDGET_ID,
+    );
+
+    expect(clockFrames).toHaveLength(2);
+    expect(weatherFrames).toHaveLength(2);
+
+    expect(clockSnapshot.dashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Current Time",
+      "Untitled Weather",
+    ]);
+    expect(weatherSnapshot.dashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Current Time",
+      "San Francisco Weather",
+    ]);
+  });
+
+  it("keeps non-focused widgets on the latest title when replaying a focused widget", () => {
+    const liveDashboard = buildDashboardStateWithTitles(
+      ["Current Time", "San Francisco Weather"],
+      "2026-03-23T12:00:05.000Z",
+    );
+    const replayDashboard = buildDashboardStateWithTitles(
+      ["Untitled Clock", "Untitled Weather"],
+      "2026-03-23T11:55:00.000Z",
+    );
+
+    const mergedDashboard = mergeFocusedWidgetReplayDashboard(
+      liveDashboard,
+      replayDashboard,
+      PUBLISHED_WIDGET_ID,
+    );
+
+    expect(mergedDashboard?.widgets.map((widget) => widget.title)).toEqual([
+      "Untitled Clock",
+      "San Francisco Weather",
+    ]);
+  });
+
+  it("keeps the latest layout when replaying a focused widget", () => {
+    const liveDashboard = buildDashboardStateWithWidgets([
+      {
+        title: "Current Time",
+        layout: { x: 8, y: 4, w: 6, h: 5 },
+        revision: "live-rev-1",
+        files: { "src/App.tsx": "export default function App() { return 'live'; }" },
+      },
+      {
+        title: "San Francisco Weather",
+        layout: { x: 1, y: 2, w: 4, h: 3 },
+      },
+    ], "2026-03-23T12:00:05.000Z");
+    const replayDashboard = buildDashboardStateWithWidgets([
+      {
+        title: "Untitled Clock",
+        layout: { x: 0, y: 0, w: 4, h: 3 },
+        revision: "replay-rev-1",
+        files: { "src/App.tsx": "export default function App() { return 'replay'; }" },
+      },
+      {
+        title: "Untitled Weather",
+        layout: { x: 20, y: 10, w: 8, h: 6 },
+      },
+    ], "2026-03-23T11:55:00.000Z");
+
+    const mergedDashboard = mergeFocusedWidgetReplayDashboard(
+      liveDashboard,
+      replayDashboard,
+      PUBLISHED_WIDGET_ID,
+    );
+
+    expect(mergedDashboard?.widgets[0]).toMatchObject({
+      title: "Untitled Clock",
+      layout: { x: 8, y: 4, w: 6, h: 5 },
+      revision: "replay-rev-1",
+      files: { "src/App.tsx": "export default function App() { return 'replay'; }" },
+    });
+    expect(mergedDashboard?.widgets[1]).toMatchObject({
+      title: "San Francisco Weather",
+      layout: { x: 1, y: 2, w: 4, h: 3 },
+    });
   });
 });

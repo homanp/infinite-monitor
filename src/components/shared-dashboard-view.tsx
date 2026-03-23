@@ -21,6 +21,7 @@ import type {
 import {
   buildSharedSessionReplayFrames,
   buildSharedSessionReplaySnapshot,
+  mergeFocusedWidgetReplayDashboard,
 } from "@/lib/share-types";
 
 function formatTimestamp(value: string) {
@@ -91,9 +92,11 @@ function fitViewport(
 function PublishedWidgetCard({
   widget,
   active,
+  onSelect,
 }: {
   widget: PublishedWidgetSnapshotV1;
   active: boolean;
+  onSelect: (publishedWidgetId: string) => void;
 }) {
   const pixelWidth = gridWidth(widget.layout.w);
   const pixelHeight = gridHeight(widget.layout.h);
@@ -112,11 +115,15 @@ function PublishedWidgetCard({
       }}
     >
       <Card className={`h-full gap-0 py-0 ${active ? "border-teal-500/40 bg-zinc-800 ring-teal-500/60" : "border-zinc-700 bg-zinc-800 ring-zinc-700"}`}>
-        <div className="border-b border-zinc-700 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => onSelect(widget.publishedWidgetId)}
+          className="w-full border-b border-zinc-700 px-3 py-2 text-left transition-colors hover:bg-zinc-800/80"
+        >
           <div className="truncate text-xs font-medium uppercase tracking-wider text-zinc-200">
             {widget.title}
           </div>
-        </div>
+        </button>
         {hasApp ? (
           <CardContent className="relative flex-1 p-0!">
             <iframe
@@ -164,6 +171,7 @@ export function SharedDashboardView({
   snapshot: SharedSessionSnapshotV1;
   liveError?: string | null;
 }) {
+  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [manualViewport, setManualViewport] = useState<{
     panX: number;
     panY: number;
@@ -171,9 +179,18 @@ export function SharedDashboardView({
   } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const liveDashboard = snapshot.dashboard;
+  const effectiveSelectedWidgetId = liveDashboard?.widgets.some(
+    (widget) => widget.publishedWidgetId === selectedWidgetId,
+  )
+    ? selectedWidgetId
+    : null;
   const replayFrames = useMemo(
-    () => buildSharedSessionReplayFrames(snapshot.replayEvents),
-    [snapshot.replayEvents],
+    () => buildSharedSessionReplayFrames(
+      snapshot.replayEvents,
+      effectiveSelectedWidgetId ?? undefined,
+    ),
+    [effectiveSelectedWidgetId, snapshot.replayEvents],
   );
   const replayStepCount = replayFrames.length > 0 ? replayFrames.length - 1 : 0;
   const [replayFrameIndex, setReplayFrameIndex] = useState(replayStepCount);
@@ -199,6 +216,19 @@ export function SharedDashboardView({
     });
   }, [replayStepCount]);
 
+  const handleSelectedWidgetIdChange = (nextSelectedWidgetId: string | null) => {
+    const nextReplayFrames = buildSharedSessionReplayFrames(
+      snapshot.replayEvents,
+      nextSelectedWidgetId ?? undefined,
+    );
+    const nextReplayStepCount = nextReplayFrames.length > 0
+      ? nextReplayFrames.length - 1
+      : 0;
+
+    setSelectedWidgetId(nextSelectedWidgetId);
+    setReplayFrameIndex(nextReplayStepCount);
+  };
+
   const effectiveSnapshot = useMemo(() => {
     if (replayFrames.length === 0) {
       return snapshot;
@@ -208,12 +238,18 @@ export function SharedDashboardView({
       snapshot.shareId,
       snapshot.replayEvents,
       replayFrameIndex,
+      effectiveSelectedWidgetId ?? undefined,
     );
-  }, [replayFrameIndex, replayFrames.length, snapshot]);
-  const dashboard = effectiveSnapshot.dashboard ?? snapshot.dashboard;
+  }, [effectiveSelectedWidgetId, replayFrameIndex, replayFrames.length, snapshot]);
+  const dashboard = mergeFocusedWidgetReplayDashboard(
+    snapshot.dashboard,
+    effectiveSnapshot.dashboard,
+    effectiveSelectedWidgetId,
+  );
   const session = effectiveSnapshot.session;
   const currentReplayFrame = replayFrames[replayFrameIndex] ?? null;
-  const activeReplayWidgetId = currentReplayFrame?.traceEvent?.publishedWidgetId
+  const focusedWidgetId = effectiveSelectedWidgetId
+    ?? currentReplayFrame?.traceEvent?.publishedWidgetId
     ?? session.activeWidgetId
     ?? null;
   const canvasItems = useMemo(
@@ -223,8 +259,8 @@ export function SharedDashboardView({
     ],
     [dashboard],
   );
-  const liveAction = session.activeWidgetId
-    ? session.currentActions[session.activeWidgetId] ?? null
+  const liveAction = focusedWidgetId
+    ? session.currentActions[focusedWidgetId] ?? null
     : null;
   const viewport = manualViewport
     ?? dashboard?.viewport
@@ -299,7 +335,8 @@ export function SharedDashboardView({
                   <PublishedWidgetCard
                     key={`${widget.publishedWidgetId}:${widget.revision}`}
                     widget={widget}
-                    active={activeReplayWidgetId === widget.publishedWidgetId}
+                    active={focusedWidgetId === widget.publishedWidgetId}
+                    onSelect={handleSelectedWidgetIdChange}
                   />
                 ))}
                 {dashboard.textBlocks.map((textBlock) => (
@@ -321,11 +358,14 @@ export function SharedDashboardView({
         </div>
         <SharedTracePanel
           key={snapshot.shareId}
+          widgets={liveDashboard?.widgets ?? dashboard.widgets}
+          selectedWidgetId={effectiveSelectedWidgetId}
           liveSession={snapshot.session}
           replaySession={session}
           replayFrames={replayFrames}
           replayFrameIndex={replayFrameIndex}
           onReplayFrameIndexChange={setReplayFrameIndex}
+          onSelectWidgetId={handleSelectedWidgetIdChange}
           liveError={liveError}
         />
       </div>

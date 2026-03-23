@@ -187,25 +187,6 @@ function ConversationMessages({
 }
 const draftInputs = new Map<string, string>();
 
-function updateAssistantMessage(
-  widgetId: string,
-  messageId: string,
-  content: string
-) {
-  useWidgetStore.setState((state) => ({
-    widgets: state.widgets.map((w) =>
-      w.id === widgetId
-        ? {
-            ...w,
-            messages: w.messages.map((m) =>
-              m.id === messageId ? { ...m, content } : m
-            ),
-          }
-        : w
-    ),
-  }));
-}
-
 async function streamToWidget(
   widgetId: string,
   messages: Array<{ role: "user" | "assistant"; content: string | Record<string, unknown>[] }>,
@@ -215,6 +196,7 @@ async function streamToWidget(
 ) {
   const {
     addMessage,
+    updateMessageContent,
     setWidgetCode,
     setWidgetFile,
     bumpIframeVersion,
@@ -305,7 +287,7 @@ async function streamToWidget(
 
     if (!res.ok) {
       const err = await res.text();
-      updateAssistantMessage(widgetId, currentMsgId, `Error: ${err}`);
+      updateMessageContent(widgetId, currentMsgId, `Error: ${err}`);
       return;
     }
 
@@ -341,7 +323,7 @@ async function streamToWidget(
             setReasoningStreaming(widgetId, false);
             hasEmittedText = true;
             fullText += event.text;
-            updateAssistantMessage(widgetId, currentMsgId, fullText);
+            updateMessageContent(widgetId, currentMsgId, fullText);
           } else if (event.type === "widget-file") {
             if (event.path && event.content) {
               setWidgetFile(widgetId, event.path, event.content);
@@ -380,13 +362,13 @@ async function streamToWidget(
           } else if (event.type === "tool-result") {
             clearActionWithMinimumVisibility();
           } else if (event.type === "abort") {
-            updateAssistantMessage(
+            updateMessageContent(
               widgetId,
               currentMsgId,
               fullText || "[Interrupted]"
             );
           } else if (event.type === "error") {
-            updateAssistantMessage(
+            updateMessageContent(
               widgetId,
               currentMsgId,
               `Error: ${event.error}`
@@ -399,9 +381,9 @@ async function streamToWidget(
     }
   } catch (err) {
     if ((err as Error).name === "AbortError") {
-      updateAssistantMessage(widgetId, currentMsgId, fullText || "[Interrupted]");
+      updateMessageContent(widgetId, currentMsgId, fullText || "[Interrupted]");
     } else {
-      updateAssistantMessage(widgetId, currentMsgId, `Error: ${String(err)}`);
+      updateMessageContent(widgetId, currentMsgId, `Error: ${String(err)}`);
     }
   } finally {
     abortControllers.delete(widgetId);
