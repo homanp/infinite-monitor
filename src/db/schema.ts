@@ -6,6 +6,7 @@ export const dashboards = sqliteTable("dashboards", {
   title: text("title").notNull().default("Dashboard"),
   widgetIdsJson: text("widget_ids_json"),
   textBlockIdsJson: text("text_block_ids_json"),
+  viewportJson: text("viewport_json"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

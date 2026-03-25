@@ -1,16 +1,23 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChevronDown, Plus, Pencil, Check, Trash2, LayoutDashboard } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
+import { ChevronDown, Plus, Pencil, Check, Trash2, LayoutDashboard, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useWidgetStore } from "@/store/widget-store";
 import { scheduleSyncToServer } from "@/lib/sync-db";
 
-export function DashboardPicker() {
+export function DashboardPicker({ currentShareTitle }: { currentShareTitle?: string } = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const isOnSharePage = pathname.startsWith("/share/");
+
   const dashboards = useWidgetStore((s) => s.dashboards);
   const activeDashboardId = useWidgetStore((s) => s.activeDashboardId);
+  const savedShares = useWidgetStore((s) => s.savedShares);
+  const removeShare = useWidgetStore((s) => s.removeShare);
   const addDashboard = useWidgetStore((s) => s.addDashboard);
   const renameDashboard = useWidgetStore((s) => s.renameDashboard);
   const removeDashboard = useWidgetStore((s) => s.removeDashboard);
@@ -58,8 +65,9 @@ export function DashboardPicker() {
     setOpen(false);
     setEditingId(null);
     setCreatingNew(false);
-    scheduleSyncToServer();
-  }, [setActiveDashboard]);
+    scheduleSyncToServer({ dirtyDashboardIds: [id] });
+    if (isOnSharePage) router.push("/");
+  }, [setActiveDashboard, isOnSharePage, router]);
 
   const handleStartEdit = useCallback((e: React.MouseEvent, id: string, title: string) => {
     e.stopPropagation();
@@ -70,7 +78,7 @@ export function DashboardPicker() {
   const handleFinishEdit = useCallback(() => {
     if (editingId && editValue.trim()) {
       renameDashboard(editingId, editValue.trim());
-      scheduleSyncToServer();
+      scheduleSyncToServer({ dirtyDashboardIds: [editingId] });
     }
     setEditingId(null);
   }, [editingId, editValue, renameDashboard]);
@@ -81,8 +89,9 @@ export function DashboardPicker() {
     setActiveDashboard(id);
     setCreatingNew(false);
     setNewName("");
-    scheduleSyncToServer();
-  }, [newName, addDashboard, setActiveDashboard]);
+    scheduleSyncToServer({ dirtyDashboardIds: [id] });
+    if (isOnSharePage) router.push("/");
+  }, [newName, addDashboard, setActiveDashboard, isOnSharePage, router]);
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -113,8 +122,6 @@ export function DashboardPicker() {
     }).catch(() => {});
   }, [removeDashboard, dashboards]);
 
-  if (dashboards.length === 0) return null;
-
   return (
     <div className="relative" ref={dropdownRef}>
       <Button
@@ -127,7 +134,7 @@ export function DashboardPicker() {
       >
         <LayoutDashboard className="h-4 w-4" />
         <span className="max-w-[140px] truncate">
-          {activeDashboard?.title ?? "Dashboard"}
+          {isOnSharePage ? (currentShareTitle ?? "Shared") : (activeDashboard?.title ?? "Dashboard")}
         </span>
         <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
       </Button>
@@ -190,6 +197,35 @@ export function DashboardPicker() {
               </div>
             ))}
           </div>
+
+          {savedShares.length > 0 && (
+            <div className="border-t border-zinc-700 py-1">
+              {savedShares.map((share) => (
+                <div
+                  key={share.shareId}
+                  onClick={() => { setOpen(false); router.push(`/share/${share.shareId}`); }}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 text-xs uppercase tracking-wider cursor-pointer transition-colors",
+                    isOnSharePage && pathname === `/share/${share.shareId}`
+                      ? "text-zinc-100 bg-zinc-700/50"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/30"
+                  )}
+                >
+                  <Share2 className="h-3 w-3 shrink-0 text-zinc-500" />
+                  <span className="flex-1 truncate">{share.title}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeShare(share.shareId); }}
+                    className="text-zinc-500 hover:text-red-400 shrink-0"
+                    style={{ opacity: 0 }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = "0"; }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="border-t border-zinc-700">
             {creatingNew ? (

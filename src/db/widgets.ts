@@ -1,5 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db, schema } from ".";
+import { isPublishedWidgetId } from "@/lib/share";
 
 const { widgets, dashboards, textBlocks } = schema;
 
@@ -115,6 +116,7 @@ export function upsertDashboard(data: {
   title?: string;
   widgetIdsJson?: string | null;
   textBlockIdsJson?: string | null;
+  viewportJson?: string | null;
 }) {
   const existing = getDashboard(data.id);
   if (existing) {
@@ -136,6 +138,14 @@ export function upsertDashboard(data: {
 
 export function deleteDashboard(id: string) {
   db.delete(dashboards).where(eq(dashboards.id, id)).run();
+}
+
+export function getDashboardByWidgetId(widgetId: string): DashboardRecord | undefined {
+  return db
+    .select()
+    .from(dashboards)
+    .where(sql`EXISTS (SELECT 1 FROM json_each(${dashboards.widgetIdsJson}) WHERE json_each.value = ${widgetId})`)
+    .get();
 }
 
 // ── Text Blocks ──
@@ -179,7 +189,7 @@ export function deleteTextBlock(id: string) {
 // ── Bulk sync (for local-first push/pull) ──
 
 export function syncState(data: {
-  dashboards: Array<{ id: string; title: string; widgetIds: string[]; textBlockIds?: string[]; createdAt: number }>;
+  dashboards: Array<{ id: string; title: string; widgetIds: string[]; textBlockIds?: string[]; createdAt: number; viewport?: unknown }>;
   widgets: Array<{
     id: string;
     title: string;
@@ -196,12 +206,29 @@ export function syncState(data: {
     layout: unknown;
   }>;
 }) {
+  const nextWidgetIds = new Set(data.widgets.map((w) => w.id));
+  const nextTextBlockIds = new Set((data.textBlocks ?? []).map((tb) => tb.id));
+  const nextDashboardIds = new Set(data.dashboards.map((d) => d.id));
+
+  for (const existing of getAllWidgets()) {
+    if (!nextWidgetIds.has(existing.id) && !isPublishedWidgetId(existing.id)) {
+      deleteWidget(existing.id);
+    }
+  }
+  for (const existing of getAllTextBlocks()) {
+    if (!nextTextBlockIds.has(existing.id)) deleteTextBlock(existing.id);
+  }
+  for (const existing of getAllDashboards()) {
+    if (!nextDashboardIds.has(existing.id)) deleteDashboard(existing.id);
+  }
+
   for (const d of data.dashboards) {
     upsertDashboard({
       id: d.id,
       title: d.title,
       widgetIdsJson: JSON.stringify(d.widgetIds),
       textBlockIdsJson: JSON.stringify(d.textBlockIds ?? []),
+      ...(d.viewport != null ? { viewportJson: JSON.stringify(d.viewport) } : {}),
     });
   }
   for (const w of data.widgets) {

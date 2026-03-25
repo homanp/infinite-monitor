@@ -85,7 +85,7 @@ function TemplateGallery({ containerRef }: { containerRef: React.RefObject<HTMLD
       setViewport(activeDashboardId, { panX: fitPanX, panY: fitPanY, zoom: fitZoom });
     }
 
-    scheduleSyncToServer();
+    scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
     setApplying(null);
   };
 
@@ -223,32 +223,33 @@ export function DashboardGrid() {
   const handleLayoutChange = useCallback(
     (widgetId: string, layout: CanvasLayout) => {
       updateWidgetLayout(widgetId, layout);
+      scheduleSyncToServer({ urgency: "interactive", dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
     },
-    [updateWidgetLayout]
+    [updateWidgetLayout, activeDashboardId]
   );
 
   const handleTextBlockTextChange = useCallback(
     (id: string, text: string) => {
       updateTextBlock(id, { text });
-      scheduleSyncToServer();
+      scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
     },
-    [updateTextBlock]
+    [updateTextBlock, activeDashboardId]
   );
 
   const handleTextBlockFontSizeChange = useCallback(
     (id: string, fontSize: number) => {
       updateTextBlock(id, { fontSize });
-      scheduleSyncToServer();
+      scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
     },
-    [updateTextBlock]
+    [updateTextBlock, activeDashboardId]
   );
 
   const handleTextBlockLayoutChange = useCallback(
     (id: string, layout: CanvasLayout) => {
       updateTextBlockLayout(id, layout);
-      scheduleSyncToServer();
+      scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
     },
-    [updateTextBlockLayout]
+    [updateTextBlockLayout, activeDashboardId]
   );
 
   const handleRemoveTextBlock = useCallback(

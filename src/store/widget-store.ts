@@ -1,5 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { DEFAULT_CANVAS_VIEWPORT } from "@/lib/canvas-viewport";
+import {
+  configureSyncPayloadProvider,
+  type SyncPayload,
+  type SyncUrgency,
+} from "@/lib/sync-db";
 
 export interface MessageAttachment {
   name: string;
@@ -55,9 +61,16 @@ export interface Dashboard {
   createdAt: number;
 }
 
+export interface SavedShare {
+  shareId: string;
+  title: string;
+  savedAt: number;
+}
+
 interface WidgetStore {
   dashboards: Dashboard[];
   activeDashboardId: string | null;
+  savedShares: SavedShare[];
   widgets: Widget[];
   textBlocks: TextBlock[];
   activeWidgetId: string | null;
@@ -73,6 +86,7 @@ interface WidgetStore {
 
   addWidget: (title?: string, description?: string) => string;
   addMessage: (widgetId: string, message: WidgetMessage) => void;
+  updateMessageContent: (widgetId: string, messageId: string, content: string) => void;
   renameWidget: (id: string, title: string) => void;
   setWidgetCode: (widgetId: string, code: string) => void;
   setWidgetFile: (widgetId: string, path: string, content: string) => void;
@@ -96,6 +110,9 @@ interface WidgetStore {
       layoutJson: string | null;
     }>;
   }) => void;
+
+  saveShare: (shareId: string, title: string) => void;
+  removeShare: (shareId: string) => void;
 
   addTextBlock: (position?: { x: number; y: number }) => string;
   updateTextBlock: (id: string, updates: Partial<Pick<TextBlock, "text" | "fontSize">>) => void;
@@ -166,6 +183,7 @@ export const useWidgetStore = create<WidgetStore>()(
     (set, get) => ({
       dashboards: [],
       activeDashboardId: null,
+      savedShares: [],
       widgets: [],
       textBlocks: [],
       activeWidgetId: null,
@@ -173,6 +191,21 @@ export const useWidgetStore = create<WidgetStore>()(
       currentActions: {},
       reasoningStreamingIds: [],
       viewports: {},
+
+      saveShare: (shareId, title) => {
+        set((state) => ({
+          savedShares: [
+            ...state.savedShares.filter((s) => s.shareId !== shareId),
+            { shareId, title, savedAt: Date.now() },
+          ],
+        }));
+      },
+
+      removeShare: (shareId) => {
+        set((state) => ({
+          savedShares: state.savedShares.filter((s) => s.shareId !== shareId),
+        }));
+      },
 
       addDashboard: (title = "Dashboard") => {
         const id = generateId("dash");
@@ -268,6 +301,16 @@ export const useWidgetStore = create<WidgetStore>()(
           widgets: get().widgets.map((w) =>
             w.id === widgetId
               ? { ...w, messages: [...w.messages, message] }
+              : w
+          ),
+        });
+      },
+
+      updateMessageContent: (widgetId, messageId, content) => {
+        set({
+          widgets: get().widgets.map((w) =>
+            w.id === widgetId
+              ? { ...w, messages: w.messages.map((m) => m.id === messageId ? { ...m, content } : m) }
               : w
           ),
         });
@@ -604,6 +647,7 @@ export const useWidgetStore = create<WidgetStore>()(
           streamingWidgetIds: [],
           currentActions: {},
           reasoningStreamingIds: [],
+          savedShares: stored.savedShares ?? [],
           viewports: migrateViewports(stored.viewports),
           widgets,
           textBlocks,
@@ -612,3 +656,35 @@ export const useWidgetStore = create<WidgetStore>()(
     }
   )
 );
+
+type DurableStoreState = Pick<WidgetStore, "dashboards" | "widgets" | "textBlocks" | "viewports">;
+
+export function buildSyncPayloadFromStoreState(state: DurableStoreState): SyncPayload {
+  return {
+    dashboards: state.dashboards.map((d) => ({
+      id: d.id,
+      title: d.title,
+      widgetIds: d.widgetIds,
+      textBlockIds: d.textBlockIds ?? [],
+      createdAt: d.createdAt,
+      viewport: state.viewports[d.id] ?? DEFAULT_CANVAS_VIEWPORT,
+    })),
+    widgets: state.widgets.map((w) => ({
+      id: w.id,
+      title: w.title,
+      description: w.description,
+      code: w.code,
+      files: w.files,
+      layout: w.layout,
+      messages: w.messages,
+    })),
+    textBlocks: state.textBlocks.map((tb) => ({
+      id: tb.id,
+      text: tb.text,
+      fontSize: tb.fontSize,
+      layout: tb.layout,
+    })),
+  };
+}
+
+configureSyncPayloadProvider(() => buildSyncPayloadFromStoreState(useWidgetStore.getState()));

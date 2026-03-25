@@ -15,6 +15,7 @@ export function AddMenu() {
   const addWidget = useWidgetStore((s) => s.addWidget);
   const setActiveWidget = useWidgetStore((s) => s.setActiveWidget);
   const addTextBlock = useWidgetStore((s) => s.addTextBlock);
+  const activeDashboardId = useWidgetStore((s) => s.activeDashboardId);
 
   return (
     <DropdownMenu>
@@ -34,7 +35,7 @@ export function AddMenu() {
           onClick={() => {
             const id = addWidget();
             setActiveWidget(id);
-            scheduleSyncToServer();
+            scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
           }}
           className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >
@@ -44,7 +45,7 @@ export function AddMenu() {
         <DropdownMenuItem
           onClick={() => {
             addTextBlock();
-            scheduleSyncToServer();
+            scheduleSyncToServer({ dirtyDashboardIds: activeDashboardId ? [activeDashboardId] : [] });
           }}
           className="gap-2 cursor-pointer text-xs uppercase tracking-wider"
         >

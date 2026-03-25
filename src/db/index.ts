@@ -59,6 +59,9 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS text_blocks (
   if (!dashColNames.has("text_block_ids_json")) {
     sqlite.exec("ALTER TABLE dashboards ADD COLUMN text_block_ids_json TEXT");
   }
+  if (!dashColNames.has("viewport_json")) {
+    sqlite.exec("ALTER TABLE dashboards ADD COLUMN viewport_json TEXT");
+  }
 }
 
 export const db = drizzle(sqlite, { schema });

@@ -17,6 +17,9 @@ import {
 } from "@/db/widgets";
 import { webSearch, type SearchProvider } from "@/lib/web-search";
 import { scanUrls } from "@/lib/brin";
+import { nanoid } from "nanoid";
+import { maybeCreateTraceRecorder, publishDashboardStateForWidgetIfShared } from "@/lib/share-recorder";
+import type { SharedChatMessage } from "@/lib/share-types";
 
 interface McpServerPayload {
   name: string;
@@ -178,6 +181,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "widgetId required" }, { status: 400 });
   }
 
+  const traceRecorder = await maybeCreateTraceRecorder(widgetId).catch(() => null);
+  traceRecorder?.startRun();
+
   const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
   const useAnthropic = isAnthropicModel(selectedModel);
 
@@ -219,7 +225,9 @@ export async function POST(request: Request) {
         await writeWidgetFile(widgetId, relative, content);
         if (relative === "src/App.tsx") {
           rebuildWidget(widgetId).catch(console.error);
+          publishDashboardStateForWidgetIfShared(widgetId).catch(() => {});
         }
+        traceRecorder?.record("file-written", `Wrote ${relative}`, { path: relative });
       }
     },
   };
@@ -384,6 +392,7 @@ export async function POST(request: Request) {
         accumulated: string;
         sent: boolean;
       } | null = null;
+      let assistantText = "";
 
       try {
         for await (const part of result.fullStream) {
@@ -393,6 +402,7 @@ export async function POST(request: Request) {
               break;
 
             case "text-delta":
+              assistantText += part.text;
               send({ type: "text-delta", text: part.text });
               break;
 
@@ -438,6 +448,10 @@ export async function POST(request: Request) {
               pendingToolInput = null;
               const input = part.input as Record<string, unknown> | undefined;
               const toolCallId = (part as { toolCallId?: string }).toolCallId;
+              const traceDetail = part.toolName === "writeFile" ? `Wrote ${input?.path ?? "file"}`
+                : part.toolName === "bash" ? `Ran ${String(input?.command ?? "").slice(0, 80)}`
+                : `Called ${part.toolName}`;
+              traceRecorder?.record("tool-call", traceDetail, { toolName: part.toolName });
               if (part.toolName === "writeFile") {
                 send({ type: "widget-file", path: input?.path, content: input?.content });
                 if (input?.path === "src/App.tsx") {
@@ -523,20 +537,32 @@ export async function POST(request: Request) {
             }
 
             case "abort":
+              traceRecorder?.record("run-abort", "Run aborted");
               send({ type: "abort" });
               break;
 
             case "error":
+              traceRecorder?.record("run-error", String(part.error));
               send({ type: "error", error: String(part.error) });
               break;
           }
         }
 
+        traceRecorder?.record("run-finished", "Run completed");
+        if (traceRecorder && assistantText) {
+          const chatMessages: SharedChatMessage[] = [
+            ...messages.map((m, i) => ({ id: `msg-${i}`, role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
+            { id: `msg-${messages.length}`, role: "assistant" as const, content: assistantText },
+          ];
+          traceRecorder.flushMessages(chatMessages);
+        }
         send({ type: "done" });
       } catch (err) {
+        traceRecorder?.record("run-error", String(err));
         send({ type: "error", error: String(err) });
       } finally {
         clearInterval(keepalive);
+        await traceRecorder?.flush();
         for (const client of mcpClients) {
           client.close().catch(() => {});
         }
