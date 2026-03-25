@@ -123,13 +123,7 @@ export interface SharedSessionSnapshotV1 {
   dashboard: DashboardSharedStateV1 | null;
   trace: SharedTraceStateV1;
   chats: SharedWidgetChat[];
-  replayEvents: SharedSessionEventV1[];
   updatedAt: string;
-}
-
-export interface SharedSessionReplayFrameV1 {
-  traceEvent: PublishedTraceEventV1 | null;
-  endEventIndex: number;
 }
 
 // ── Zod schemas ──
@@ -204,7 +198,6 @@ export const SharedSessionSnapshotV1Schema = z.object({
   dashboard: DashboardSharedStateV1Schema.nullable(),
   trace: SharedTraceStateV1Schema,
   chats: z.array(SharedWidgetChatSchema).optional(),
-  replayEvents: z.array(SharedSessionEventV1Schema),
 });
 
 // ── Empty state builders ──
@@ -214,7 +207,7 @@ export function buildEmptySharedTraceState(shareId: string, updatedAt = new Date
 }
 
 export function buildEmptySharedSessionSnapshot(shareId: string, updatedAt = new Date().toISOString()): SharedSessionSnapshotV1 {
-  return { version: "v1", shareId, dashboard: null, trace: buildEmptySharedTraceState(shareId, updatedAt), chats: [], replayEvents: [], updatedAt };
+  return { version: "v1", shareId, dashboard: null, trace: buildEmptySharedTraceState(shareId, updatedAt), chats: [], updatedAt };
 }
 
 // ── Reducer ──
@@ -235,115 +228,6 @@ function reduceSlices(snapshot: SharedSessionSnapshotV1, event: SharedSessionEve
   }
 }
 
-function trimReplayEvents(events: SharedSessionEventV1[], maxTrace = MAX_SHARED_TRACE_EVENTS): SharedSessionEventV1[] {
-  if (events.length === 0) return events;
-  const traceIndices = events.flatMap((e, i) => (e.kind === "trace.event" ? [i] : []));
-  if (traceIndices.length === 0) {
-    const lastDash = events.findLastIndex((e) => e.kind === "dashboard.state");
-    return lastDash >= 0 ? events.slice(lastDash) : events.slice(-1);
-  }
-  const firstKeep = traceIndices[Math.max(0, traceIndices.length - maxTrace)];
-  const lastDashBefore = events.slice(0, firstKeep).findLastIndex((e) => e.kind === "dashboard.state");
-  const start = lastDashBefore >= 0 ? lastDashBefore : firstKeep;
-  return events.slice(start);
-}
-
 export function applySharedSessionEvent(snapshot: SharedSessionSnapshotV1, event: SharedSessionEventV1): SharedSessionSnapshotV1 {
-  return {
-    ...reduceSlices(snapshot, event),
-    replayEvents: trimReplayEvents([...snapshot.replayEvents, event]),
-  };
-}
-
-// ── Replay helpers ──
-
-export function buildSharedSessionReplayFrames(
-  replayEvents: SharedSessionEventV1[],
-  publishedWidgetId?: string,
-): SharedSessionReplayFrameV1[] {
-  const allTraceIndices = replayEvents.flatMap((e, i) => (e.kind === "trace.event" ? [i] : []));
-  const traceIndices = replayEvents.flatMap((e, i) =>
-    e.kind === "trace.event" && (!publishedWidgetId || e.event.publishedWidgetId === publishedWidgetId) ? [i] : [],
-  );
-  if (traceIndices.length === 0) return [];
-
-  const frames: SharedSessionReplayFrameV1[] = [{ traceEvent: null, endEventIndex: traceIndices[0] }];
-  for (const eventIndex of traceIndices) {
-    const event = replayEvents[eventIndex];
-    if (event?.kind !== "trace.event") continue;
-    const nextTrace = allTraceIndices.find((i) => i > eventIndex);
-    frames.push({ traceEvent: event.event, endEventIndex: nextTrace ?? replayEvents.length });
-  }
-  return frames;
-}
-
-export function buildSharedSessionReplaySnapshot(
-  shareId: string,
-  replayEvents: SharedSessionEventV1[],
-  frameIndex: number,
-  publishedWidgetId?: string,
-): SharedSessionSnapshotV1 {
-  const frames = buildSharedSessionReplayFrames(replayEvents, publishedWidgetId);
-  if (frames.length === 0) return { ...buildEmptySharedSessionSnapshot(shareId), replayEvents };
-  const safeIndex = Math.max(0, Math.min(frameIndex, frames.length - 1));
-  const endIndex = frames[safeIndex]?.endEventIndex ?? replayEvents.length;
-  let snapshot = buildEmptySharedSessionSnapshot(shareId);
-  for (const event of replayEvents.slice(0, endIndex)) {
-    snapshot = reduceSlices(snapshot, event);
-  }
-  return { ...snapshot, replayEvents };
-}
-
-function isTerminalKind(kind: PublishedTraceEventKind) {
-  return kind === "run-finished" || kind === "run-abort" || kind === "run-error";
-}
-
-export function findActiveSharedTraceEvent(
-  events: PublishedTraceEventV1[],
-  publishedWidgetId?: string,
-): PublishedTraceEventV1 | null {
-  const closedRuns = new Set<string>();
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (publishedWidgetId && e.publishedWidgetId !== publishedWidgetId) continue;
-    if (isTerminalKind(e.kind)) { closedRuns.add(e.runId); continue; }
-    if (closedRuns.has(e.runId)) continue;
-    return e;
-  }
-  return null;
-}
-
-export function findLatestSharedTraceEvent(
-  events: PublishedTraceEventV1[],
-  publishedWidgetId?: string,
-): PublishedTraceEventV1 | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (publishedWidgetId && e.publishedWidgetId !== publishedWidgetId) continue;
-    return e;
-  }
-  return null;
-}
-
-export function mergeFocusedWidgetReplayDashboard(
-  liveDashboard: DashboardSharedStateV1 | null,
-  replayDashboard: DashboardSharedStateV1 | null,
-  focusedWidgetId: string | null,
-): DashboardSharedStateV1 | null {
-  if (!focusedWidgetId) return replayDashboard ?? liveDashboard;
-  if (!liveDashboard) return replayDashboard;
-  if (!replayDashboard) return liveDashboard;
-  const replayWidget = replayDashboard.widgets.find((w) => w.publishedWidgetId === focusedWidgetId);
-  if (!replayWidget) return liveDashboard;
-  const hasLive = liveDashboard.widgets.some((w) => w.publishedWidgetId === focusedWidgetId);
-  return {
-    ...liveDashboard,
-    widgets: hasLive
-      ? liveDashboard.widgets.map((w) =>
-          w.publishedWidgetId === focusedWidgetId
-            ? { ...w, title: replayWidget.title, description: replayWidget.description, revision: replayWidget.revision, files: replayWidget.files }
-            : w,
-        )
-      : [...liveDashboard.widgets, replayWidget],
-  };
+  return reduceSlices(snapshot, event);
 }

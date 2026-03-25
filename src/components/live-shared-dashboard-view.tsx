@@ -24,8 +24,11 @@ interface BootstrapPayload {
 export function LiveSharedDashboardView({ shareId }: { shareId: string }) {
   const saveShare = useWidgetStore((s) => s.saveShare);
 
+  const [mounted, setMounted] = useState(false);
   const [snapshot, setSnapshot] = useState<SharedSessionSnapshotV1 | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => { setMounted(true); }, []);
   const [error, setError] = useState<string | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
 
@@ -123,10 +126,23 @@ export function LiveSharedDashboardView({ shareId }: { shareId: string }) {
     className: "gap-1.5 border border-zinc-700 bg-zinc-800 text-zinc-200 uppercase tracking-wider !text-xs pointer-events-none",
   });
 
-  if (loading) {
+  const shareTitle = snapshot?.dashboard?.title;
+  const statusLabel = !mounted || loading ? "Connecting" : liveError ? "Reconnecting" : error ? "Offline" : "Live sync";
+  const statusAlert = !mounted || loading || liveError || error;
+
+  const header = (
+    <AppHeader>
+      <DashboardPicker currentShareTitle={shareTitle ?? "Shared"} />
+      <div className={cn(chipCn, statusAlert ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100")}>
+        <Eye className="h-3.5 w-3.5" />{statusLabel}
+      </div>
+    </AppHeader>
+  );
+
+  if (!mounted || loading) {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-zinc-900">
-        <AppHeader><DashboardPicker currentShareTitle={snapshot?.dashboard?.title} /></AppHeader>
+        {header}
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-zinc-500"><LoaderCircle className="h-4 w-4 animate-spin" />Loading…</div>
       </div>
     );
@@ -135,7 +151,7 @@ export function LiveSharedDashboardView({ shareId }: { shareId: string }) {
   if (error || !snapshot?.dashboard) {
     return (
       <div className="flex h-screen flex-col overflow-hidden bg-zinc-900">
-        <AppHeader><DashboardPicker currentShareTitle={snapshot?.dashboard?.title} /></AppHeader>
+        {header}
         <div className="flex flex-1 items-center justify-center px-6">
           <div className="max-w-md border border-zinc-800 bg-zinc-900/60 p-6 text-center">
             <AlertTriangle className="mx-auto h-5 w-5 text-amber-300" />
@@ -150,12 +166,7 @@ export function LiveSharedDashboardView({ shareId }: { shareId: string }) {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-900">
-      <AppHeader>
-        <DashboardPicker currentShareTitle={snapshot?.dashboard?.title} />
-        <div className={cn(chipCn, liveError && "border-amber-500/30 bg-amber-500/10 text-amber-100")}>
-          <Eye className="h-3.5 w-3.5" />{liveError ? "Reconnecting" : "Live sync"}
-        </div>
-      </AppHeader>
+      {header}
       <SharedDashboardView snapshot={snapshot} liveError={liveError} />
     </div>
   );

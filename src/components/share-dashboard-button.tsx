@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { Check, Copy, ExternalLink, Loader2, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWidgetStore } from "@/store/widget-store";
@@ -20,7 +21,8 @@ export function ShareDashboardButton() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  if (!activeDashboardId) return null;
+  const pathname = usePathname();
+  if (!activeDashboardId || pathname.startsWith("/share/")) return null;
 
   const handleShare = async () => {
     setLoading(true);

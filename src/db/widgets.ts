@@ -131,6 +131,7 @@ export function upsertDashboard(data: {
         title: data.title ?? "Dashboard",
         widgetIdsJson: data.widgetIdsJson ?? null,
         textBlockIdsJson: data.textBlockIdsJson ?? null,
+        viewportJson: data.viewportJson ?? null,
       })
       .run();
   }
