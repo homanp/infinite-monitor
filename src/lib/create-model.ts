@@ -19,22 +19,35 @@ import type { CustomApiConfig } from "@/store/settings-store";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ProviderFactory = (opts?: { apiKey?: string; baseURL?: string }) => (modelId: string) => any;
 
+const REQUEST_TIMEOUT_MS = 800_000; // ~13 min — match maxDuration on API routes
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (init?.signal) return fetch(input, init);
+  return fetch(input, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+}
+
+interface ProviderOpts { apiKey?: string; baseURL?: string }
+
+function withTimeout(opts?: ProviderOpts): ProviderOpts & { fetch: typeof fetch } {
+  return { ...opts, fetch: fetchWithTimeout as typeof fetch };
+}
+
 const providers: Record<string, ProviderFactory> = {
-  anthropic: (opts) => createAnthropic(opts),
-  openai: (opts) => createOpenAI(opts),
-  google: (opts) => createGoogleGenerativeAI(opts),
-  xai: (opts) => createXai(opts),
-  mistral: (opts) => createMistral(opts),
-  groq: (opts) => createGroq(opts),
-  deepseek: (opts) => createDeepSeek(opts),
-  perplexity: (opts) => createPerplexity(opts),
-  cohere: (opts) => createCohere(opts),
-  cerebras: (opts) => createCerebras(opts),
-  togetherai: (opts) => createTogetherAI(opts),
-  fireworks: (opts) => createFireworks(opts),
-  moonshotai: (opts) => createMoonshotAI(opts),
-  alibaba: (opts) => createAlibaba(opts),
-  deepinfra: (opts) => createDeepInfra(opts),
+  anthropic: (opts) => createAnthropic(withTimeout(opts)),
+  openai: (opts) => createOpenAI(withTimeout(opts)),
+  google: (opts) => createGoogleGenerativeAI(withTimeout(opts)),
+  xai: (opts) => createXai(withTimeout(opts)),
+  mistral: (opts) => createMistral(withTimeout(opts)),
+  groq: (opts) => createGroq(withTimeout(opts)),
+  deepseek: (opts) => createDeepSeek(withTimeout(opts)),
+  perplexity: (opts) => createPerplexity(withTimeout(opts)),
+  cohere: (opts) => createCohere(withTimeout(opts)),
+  cerebras: (opts) => createCerebras(withTimeout(opts)),
+  togetherai: (opts) => createTogetherAI(withTimeout(opts)),
+  fireworks: (opts) => createFireworks(withTimeout(opts)),
+  moonshotai: (opts) => createMoonshotAI(withTimeout(opts)),
+  alibaba: (opts) => createAlibaba(withTimeout(opts)),
+  deepinfra: (opts) => createDeepInfra(withTimeout(opts)),
 };
 
 const CUSTOM_PROVIDER_PREFIX = "custom:";

@@ -106,6 +106,8 @@ function KittLoader() {
 }
 
 const abortControllers = new Map<string, AbortController>();
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1500;
 
 function ReasoningBlock({
   text,
@@ -288,120 +290,165 @@ async function streamToWidget(
         env: s.env,
       }));
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages,
-        widgetId,
-        model,
-        apiKey,
-        ...(searchProvider && searchApiKey ? { searchProvider, searchApiKey } : {}),
-        ...(enabledMcpServers.length > 0 ? { mcpServers: enabledMcpServers } : {}),
-        ...(customApi ? { customApi } : {}),
-      }),
-      signal: controller.signal,
+    const body = JSON.stringify({
+      messages,
+      widgetId,
+      model,
+      apiKey,
+      ...(searchProvider && searchApiKey ? { searchProvider, searchApiKey } : {}),
+      ...(enabledMcpServers.length > 0 ? { mcpServers: enabledMcpServers } : {}),
+      ...(customApi ? { customApi } : {}),
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      updateAssistantMessage(widgetId, currentMsgId, `Error: ${err}`);
-      return;
+    function isNetworkError(err: unknown): boolean {
+      if (err instanceof TypeError) return true;
+      const msg = String(err).toLowerCase();
+      return msg.includes("network") || msg.includes("failed to fetch") || msg.includes("econnreset") || msg.includes("socket hang up");
     }
 
-    const reader = res.body?.getReader();
-    if (!reader) return;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (controller.signal.aborted) break;
 
-    const decoder = new TextDecoder();
-    let buffer = "";
+      if (attempt > 0) {
+        showAction(`Reconnecting (attempt ${attempt + 1})…`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        if (controller.signal.aborted) break;
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: controller.signal,
+        });
 
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
+        if (!res.ok) {
+          const err = await res.text();
+          updateAssistantMessage(widgetId, currentMsgId, `Error: ${err}`);
+          return;
+        }
 
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") continue;
+        const reader = res.body?.getReader();
+        if (!reader) return;
 
-        try {
-          const event = JSON.parse(payload);
-          if (event.type === "reasoning-delta") {
-            if (hasEmittedText) {
-              startNewAssistantMessage();
-            }
-            setReasoningStreaming(widgetId, true);
-            appendReasoningToMessage(widgetId, currentMsgId, event.text);
-          } else if (event.type === "text-delta") {
-            setReasoningStreaming(widgetId, false);
-            hasEmittedText = true;
-            fullText += event.text;
-            updateAssistantMessage(widgetId, currentMsgId, fullText);
-          } else if (event.type === "widget-file") {
-            if (event.path && event.content) {
-              setWidgetFile(widgetId, event.path, event.content);
-            }
-          } else if (event.type === "widget-code") {
-            if (event.code) {
-              setWidgetCode(widgetId, event.code);
-              showAction("Building widget…");
-              setTimeout(() => bumpIframeVersion(widgetId), 15000);
-            }
-          } else if (event.type === "tool-call") {
-            let action = "";
-            if (event.toolName === "writeFile") {
-              const filePath = event.args?.path ?? "";
-              action =
-                filePath === "src/App.tsx"
-                  ? "Writing widget code"
-                  : `Writing ${filePath}`;
-            } else if (event.toolName === "readFile") {
-              action = `Reading ${event.args?.path ?? "file"}`;
-            } else if (event.toolName === "bash") {
-              const cmd = String(event.args?.command ?? "");
-              action = cmd.length > 40 ? `Running: ${cmd.slice(0, 40)}…` : `Running: ${cmd}`;
-            } else if (event.toolName === "listDashboardWidgets") {
-              action = "Checking dashboard widgets";
-            } else if (event.toolName === "readWidgetCode") {
-              action = `Reading ${event.args?.targetWidgetId ?? "sibling"} code`;
-            } else if (event.toolName === "web_search") {
-              action = event.args?.query
-                ? `Searching "${event.args.query}"`
-                : "Searching the web";
-            } else {
-              action = `Using ${event.toolName}`;
-            }
-            if (action) showAction(action);
-          } else if (event.type === "tool-result") {
-            clearActionWithMinimumVisibility();
-          } else if (event.type === "abort") {
-            updateAssistantMessage(
-              widgetId,
-              currentMsgId,
-              fullText || "[Interrupted]"
-            );
-          } else if (event.type === "error") {
-            updateAssistantMessage(
-              widgetId,
-              currentMsgId,
-              `Error: ${event.error}`
-            );
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let streamCompleted = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            streamCompleted = true;
+            break;
           }
-        } catch {
-          // skip malformed chunks
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") {
+              streamCompleted = true;
+              continue;
+            }
+
+            try {
+              const event = JSON.parse(payload);
+              if (event.type === "reasoning-delta") {
+                if (hasEmittedText) {
+                  startNewAssistantMessage();
+                }
+                setReasoningStreaming(widgetId, true);
+                appendReasoningToMessage(widgetId, currentMsgId, event.text);
+              } else if (event.type === "text-delta") {
+                setReasoningStreaming(widgetId, false);
+                hasEmittedText = true;
+                fullText += event.text;
+                updateAssistantMessage(widgetId, currentMsgId, fullText);
+              } else if (event.type === "widget-file") {
+                if (event.path && event.content) {
+                  setWidgetFile(widgetId, event.path, event.content);
+                }
+              } else if (event.type === "widget-code") {
+                if (event.code) {
+                  setWidgetCode(widgetId, event.code);
+                  showAction("Building widget…");
+                  setTimeout(() => bumpIframeVersion(widgetId), 15000);
+                }
+              } else if (event.type === "tool-call") {
+                let action = "";
+                if (event.toolName === "writeFile") {
+                  const filePath = event.args?.path ?? "";
+                  action =
+                    filePath === "src/App.tsx"
+                      ? "Writing widget code"
+                      : `Writing ${filePath}`;
+                } else if (event.toolName === "readFile") {
+                  action = `Reading ${event.args?.path ?? "file"}`;
+                } else if (event.toolName === "bash") {
+                  const cmd = String(event.args?.command ?? "");
+                  action = cmd.length > 40 ? `Running: ${cmd.slice(0, 40)}…` : `Running: ${cmd}`;
+                } else if (event.toolName === "listDashboardWidgets") {
+                  action = "Checking dashboard widgets";
+                } else if (event.toolName === "readWidgetCode") {
+                  action = `Reading ${event.args?.targetWidgetId ?? "sibling"} code`;
+                } else if (event.toolName === "web_search") {
+                  action = event.args?.query
+                    ? `Searching "${event.args.query}"`
+                    : "Searching the web";
+                } else {
+                  action = `Using ${event.toolName}`;
+                }
+                if (action) showAction(action);
+              } else if (event.type === "tool-result") {
+                clearActionWithMinimumVisibility();
+              } else if (event.type === "abort") {
+                updateAssistantMessage(
+                  widgetId,
+                  currentMsgId,
+                  fullText || "[Interrupted]"
+                );
+              } else if (event.type === "error") {
+                updateAssistantMessage(
+                  widgetId,
+                  currentMsgId,
+                  `Error: ${event.error}`
+                );
+              }
+            } catch {
+              // skip malformed chunks
+            }
+          }
+        }
+
+        if (streamCompleted) return;
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          updateAssistantMessage(widgetId, currentMsgId, fullText || "[Interrupted]");
+          return;
+        }
+        if (!isNetworkError(err) || attempt >= MAX_RETRIES) {
+          const friendly = isNetworkError(err)
+            ? "Connection lost — please check your network and try again."
+            : `Error: ${String(err)}`;
+          updateAssistantMessage(widgetId, currentMsgId, fullText ? `${fullText}\n\n${friendly}` : friendly);
+          return;
         }
       }
     }
-  } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      updateAssistantMessage(widgetId, currentMsgId, fullText || "[Interrupted]");
-    } else {
-      updateAssistantMessage(widgetId, currentMsgId, `Error: ${String(err)}`);
+
+    if (!controller.signal.aborted) {
+      updateAssistantMessage(
+        widgetId,
+        currentMsgId,
+        fullText
+          ? `${fullText}\n\nConnection lost after multiple retries — please try again.`
+          : "Connection lost after multiple retries — please try again.",
+      );
     }
   } finally {
     abortControllers.delete(widgetId);

@@ -5,6 +5,8 @@ import {
   buildWidget,
 } from "@/lib/widget-runner";
 
+export const maxDuration = 800;
+
 export async function POST(request: Request) {
   const { widgets } = (await request.json()) as {
     widgets: Array<{

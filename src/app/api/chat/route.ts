@@ -18,6 +18,8 @@ import {
 import { webSearch, type SearchProvider } from "@/lib/web-search";
 import { scanUrls } from "@/lib/brin";
 
+export const maxDuration = 800;
+
 interface McpServerPayload {
   name: string;
   type: "command" | "sse" | "streamableHttp";
