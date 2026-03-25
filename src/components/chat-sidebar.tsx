@@ -135,7 +135,7 @@ function ReasoningBlock({
   );
 }
 
-export function ConversationMessages({
+function ConversationMessages({
   messages,
   isStreaming,
   isReasoningStreaming,

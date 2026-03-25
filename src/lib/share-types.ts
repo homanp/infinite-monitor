@@ -93,6 +93,7 @@ export interface SharedChatMessage {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
+  reasoningDurationMs?: number;
 }
 
 export interface SharedChatMessagesEventV1 {
@@ -167,7 +168,7 @@ const SharedTraceEventEnvelopeV1Schema = z.object({
 
 const SharedChatMessageSchema = z.object({
   id: z.string(), role: z.enum(["user", "assistant"]), content: z.string(),
-  reasoning: z.string().optional(),
+  reasoning: z.string().optional(), reasoningDurationMs: z.number().optional(),
 });
 
 const SharedChatMessagesEventV1Schema = z.object({

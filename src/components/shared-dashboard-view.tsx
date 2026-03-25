@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { ConversationMessages } from "@/components/chat-sidebar";
 import {
   Conversation,
   ConversationContent,
 } from "@/components/ai-elements/conversation";
+import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { CELL_H, CELL_W, InfiniteCanvas, MARGIN } from "@/components/infinite-canvas";
 import { ZoomControls } from "@/components/zoom-controls";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -75,21 +75,16 @@ function PublishedTextBlock({ textBlock }: { textBlock: PublishedTextBlockSnapsh
   );
 }
 
-function SharedChatSidebar({ chats, selectedWidgetId, onClose }: { chats: SharedWidgetChat[]; selectedWidgetId: string | null; onClose: () => void }) {
+export function SharedChatSidebar({ chats, selectedWidgetId, onClose }: { chats: SharedWidgetChat[]; selectedWidgetId: string | null; onClose: () => void }) {
   const activeChat = useMemo(() => {
     if (!selectedWidgetId) return null;
     return chats.find((c) => c.publishedWidgetId === selectedWidgetId) ?? null;
   }, [chats, selectedWidgetId]);
 
-  const widgetMessages = useMemo(() =>
-    (activeChat?.messages ?? []).map((m) => ({ id: m.id, role: m.role, content: m.content, reasoning: m.reasoning })),
-    [activeChat],
-  );
-
   if (!activeChat) return null;
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-t border-zinc-800 bg-zinc-950/60 lg:h-auto lg:w-[340px] lg:border-t-0 lg:border-l">
+    <aside className="relative flex h-full w-md flex-col border-l border-zinc-800 bg-black">
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
         <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
           {activeChat.widgetTitle}
@@ -101,13 +96,23 @@ function SharedChatSidebar({ chats, selectedWidgetId, onClose }: { chats: Shared
       <ScrollArea className="min-h-0 flex-1">
         <Conversation>
           <ConversationContent>
-            <ConversationMessages
-              messages={widgetMessages}
-              isStreaming={false}
-              isReasoningStreaming={false}
-              streamingMsgId={null}
-              activeAction={null}
-            />
+            {activeChat.messages.map((msg) => (
+              <Fragment key={msg.id}>
+                {msg.role === "assistant" && msg.reasoning && (
+                  <details className="w-full mb-1 text-xs text-zinc-500">
+                    <summary className="cursor-pointer hover:text-zinc-300 select-none">
+                      Thought for {msg.reasoningDurationMs != null ? `${Math.round(msg.reasoningDurationMs / 1000)}s` : "a few seconds"}
+                    </summary>
+                    <div className="mt-1 whitespace-pre-wrap text-zinc-600 pl-2 border-l border-zinc-800">{msg.reasoning}</div>
+                  </details>
+                )}
+                {(msg.role === "user" || msg.content) && (
+                  <Message from={msg.role}>
+                    <MessageContent><MessageResponse>{msg.content}</MessageResponse></MessageContent>
+                  </Message>
+                )}
+              </Fragment>
+            ))}
           </ConversationContent>
         </Conversation>
       </ScrollArea>
@@ -115,8 +120,7 @@ function SharedChatSidebar({ chats, selectedWidgetId, onClose }: { chats: Shared
   );
 }
 
-export function SharedDashboardView({ snapshot, liveError }: { snapshot: SharedSessionSnapshotV1; liveError?: string | null }) {
-  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
+export function SharedDashboardView({ snapshot, selectedWidgetId, onSelectWidgetId }: { snapshot: SharedSessionSnapshotV1; selectedWidgetId: string | null; onSelectWidgetId: (id: string) => void }) {
   const [manualViewport, setManualViewport] = useState<{ panX: number; panY: number; zoom: number } | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -139,21 +143,20 @@ export function SharedDashboardView({ snapshot, liveError }: { snapshot: SharedS
   if (!dashboard) return null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-      <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
+    <div className="flex-1 min-h-0 min-w-0">
+      <div ref={containerRef} className="relative h-full overflow-hidden">
         {canvasItems.length === 0 ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-zinc-500">No live items yet.</div>
         ) : (
           <>
             <InfiniteCanvas panX={viewport.panX} panY={viewport.panY} zoom={viewport.zoom} onViewportChange={(px, py, z) => setManualViewport({ panX: px, panY: py, zoom: z })}>
-              {dashboard.widgets.map((w) => <PublishedWidgetCard key={`${w.publishedWidgetId}:${w.revision}`} widget={w} active={selectedWidgetId === w.publishedWidgetId} onSelect={setSelectedWidgetId} />)}
+              {dashboard.widgets.map((w) => <PublishedWidgetCard key={`${w.publishedWidgetId}:${w.revision}`} widget={w} active={selectedWidgetId === w.publishedWidgetId} onSelect={onSelectWidgetId} />)}
               {dashboard.textBlocks.map((tb) => <PublishedTextBlock key={tb.id} textBlock={tb} />)}
             </InfiniteCanvas>
             <ZoomControls zoom={viewport.zoom} panX={viewport.panX} panY={viewport.panY} containerWidth={containerSize.width} containerHeight={containerSize.height} widgets={dashboard.widgets} textBlocks={dashboard.textBlocks} onViewportChange={(px, py, z) => setManualViewport({ panX: px, panY: py, zoom: z })} />
           </>
         )}
       </div>
-      <SharedChatSidebar chats={snapshot.chats ?? []} selectedWidgetId={selectedWidgetId} onClose={() => setSelectedWidgetId(null)} />
     </div>
   );
 }

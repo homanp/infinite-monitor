@@ -40,6 +40,8 @@ export async function GET(
     return Response.json({ error: "No dashboard state" }, { status: 404 });
   }
 
+  console.log("[bootstrap] widgets:", snapshot.dashboard.widgets.map((w) => ({ id: w.publishedWidgetId, layout: w.layout, title: w.title })));
+
   // Materialize published widgets into local SQLite + trigger builds
   // so this server can serve widget iframes even if it's not the author's server
   await materializePublishedWidgets(snapshot.dashboard, { waitForBuild: false });

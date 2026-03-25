@@ -393,11 +393,19 @@ export async function POST(request: Request) {
         sent: boolean;
       } | null = null;
       let assistantText = "";
+      let assistantReasoning = "";
+      let reasoningStartedAt: number | null = null;
+      let reasoningDurationMs: number | null = null;
 
       try {
         for await (const part of result.fullStream) {
+          if (part.type !== "reasoning-delta" && reasoningStartedAt !== null && reasoningDurationMs === null) {
+            reasoningDurationMs = Date.now() - reasoningStartedAt;
+          }
           switch (part.type) {
             case "reasoning-delta":
+              if (reasoningStartedAt === null) reasoningStartedAt = Date.now();
+              assistantReasoning += part.text;
               send({ type: "reasoning-delta", text: part.text });
               break;
 
@@ -533,6 +541,14 @@ export async function POST(request: Request) {
                   toolName: resultToolName,
                 });
               }
+              if (traceRecorder) {
+                const effectiveDurationMs = reasoningDurationMs ?? (reasoningStartedAt ? Date.now() - reasoningStartedAt : undefined);
+                const interim: SharedChatMessage[] = [
+                  ...messages.map((m, i) => ({ id: `msg-${i}`, role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
+                  ...(assistantText || assistantReasoning ? [{ id: `msg-${messages.length}`, role: "assistant" as const, content: assistantText, ...(assistantReasoning ? { reasoning: assistantReasoning, ...(effectiveDurationMs ? { reasoningDurationMs: effectiveDurationMs } : {}) } : {}) }] : []),
+                ];
+                traceRecorder.flushMessages(interim);
+              }
               break;
             }
 
@@ -550,9 +566,10 @@ export async function POST(request: Request) {
 
         traceRecorder?.record("run-finished", "Run completed");
         if (traceRecorder && assistantText) {
+          const finalDurationMs = reasoningDurationMs ?? (reasoningStartedAt ? Date.now() - reasoningStartedAt : undefined);
           const chatMessages: SharedChatMessage[] = [
             ...messages.map((m, i) => ({ id: `msg-${i}`, role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) })),
-            { id: `msg-${messages.length}`, role: "assistant" as const, content: assistantText },
+            { id: `msg-${messages.length}`, role: "assistant" as const, content: assistantText, ...(assistantReasoning ? { reasoning: assistantReasoning, ...(finalDurationMs ? { reasoningDurationMs: finalDurationMs } : {}) } : {}) },
           ];
           traceRecorder.flushMessages(chatMessages);
         }
