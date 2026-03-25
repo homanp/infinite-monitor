@@ -370,6 +370,12 @@ export async function POST(request: Request) {
         );
       };
 
+      let pendingToolInput: {
+        toolName: string;
+        accumulated: string;
+        sent: boolean;
+      } | null = null;
+
       try {
         for await (const part of result.fullStream) {
           switch (part.type) {
@@ -381,8 +387,48 @@ export async function POST(request: Request) {
               send({ type: "text-delta", text: part.text });
               break;
 
+            case "tool-input-start":
+              pendingToolInput = {
+                toolName: part.toolName,
+                accumulated: "",
+                sent: false,
+              };
+              send({ type: "tool-call", toolName: part.toolName, args: {} });
+              break;
+
+            case "tool-input-delta": {
+              if (pendingToolInput && !pendingToolInput.sent) {
+                pendingToolInput.accumulated += (part as { delta: string }).delta;
+                const text = pendingToolInput.accumulated;
+                let extracted: { key: string; value: string } | null = null;
+
+                if (pendingToolInput.toolName === "writeFile" || pendingToolInput.toolName === "readFile") {
+                  const m = text.match(/"path"\s*:\s*"([^"]+)"/);
+                  if (m) extracted = { key: "path", value: m[1] };
+                } else if (pendingToolInput.toolName === "bash") {
+                  const m = text.match(/"command"\s*:\s*"([^"]+)"/);
+                  if (m) extracted = { key: "command", value: m[1] };
+                } else if (pendingToolInput.toolName === "web_search") {
+                  const m = text.match(/"query"\s*:\s*"([^"]+)"/);
+                  if (m) extracted = { key: "query", value: m[1] };
+                }
+
+                if (extracted) {
+                  pendingToolInput.sent = true;
+                  send({
+                    type: "tool-call",
+                    toolName: pendingToolInput.toolName,
+                    args: { [extracted.key]: extracted.value },
+                  });
+                }
+              }
+              break;
+            }
+
             case "tool-call": {
+              pendingToolInput = null;
               const input = part.input as Record<string, unknown> | undefined;
+              const toolCallId = (part as { toolCallId?: string }).toolCallId;
               if (part.toolName === "writeFile") {
                 send({ type: "widget-file", path: input?.path, content: input?.content });
                 if (input?.path === "src/App.tsx") {
@@ -390,42 +436,49 @@ export async function POST(request: Request) {
                 }
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "writeFile",
                   args: { path: input?.path },
                 });
               } else if (part.toolName === "readFile") {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "readFile",
                   args: { path: input?.path },
                 });
               } else if (part.toolName === "bash") {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "bash",
                   args: { command: input?.command },
                 });
               } else if (part.toolName === "listDashboardWidgets") {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "listDashboardWidgets",
                   args: {},
                 });
               } else if (part.toolName === "readWidgetCode") {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "readWidgetCode",
                   args: { targetWidgetId: input?.targetWidgetId, path: input?.path },
                 });
               } else if (part.toolName === "web_search") {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: "web_search",
                   args: { query: input?.query },
                 });
               } else {
                 send({
                   type: "tool-call",
+                  toolCallId,
                   toolName: part.toolName,
                   args: input ?? {},
                 });
@@ -433,9 +486,32 @@ export async function POST(request: Request) {
               break;
             }
 
-            case "tool-result":
-              send({ type: "tool-result" });
+            case "tool-result": {
+              const resultToolCallId = (part as { toolCallId?: string }).toolCallId;
+              const resultToolName = (part as { toolName?: string }).toolName;
+              const output = (part as { output?: unknown }).output;
+
+              if (resultToolName === "bash" && output && typeof output === "object") {
+                const { stdout, stderr, exitCode } = output as {
+                  stdout?: string;
+                  stderr?: string;
+                  exitCode?: number;
+                };
+                send({
+                  type: "tool-result",
+                  toolCallId: resultToolCallId,
+                  toolName: resultToolName,
+                  result: { stdout: stdout ?? "", stderr: stderr ?? "", exitCode: exitCode ?? 0 },
+                });
+              } else {
+                send({
+                  type: "tool-result",
+                  toolCallId: resultToolCallId,
+                  toolName: resultToolName,
+                });
+              }
               break;
+            }
 
             case "abort":
               send({ type: "abort" });

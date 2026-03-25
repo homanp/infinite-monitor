@@ -375,6 +375,7 @@ export const useWidgetStore = create<WidgetStore>()(
         }));
       },
 
+
       removeWidget: (id) => {
         set((state) => {
           const nextActions = { ...state.currentActions };

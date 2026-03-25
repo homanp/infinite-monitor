@@ -164,3 +164,4 @@ describe("addWidget", () => {
     expect(after.textBlocks.find((block) => block.id === "t1")?.layout.y).toBe(-2);
   });
 });
+
