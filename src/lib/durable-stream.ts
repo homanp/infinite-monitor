@@ -103,6 +103,11 @@ export function createDurableStreamClient(baseUrl: string) {
   }
 
   return {
+    async ensureBucket(bucket: string) {
+      const response = await request(`/ds/${encodeSegment(bucket)}`, { method: "PUT" });
+      await assertResponseOk(response, [409]);
+    },
+
     async createStream(bucket: string, streamId: string) {
       const response = await request(streamPath(bucket, streamId), {
         method: "PUT",

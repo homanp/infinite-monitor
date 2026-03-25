@@ -16,6 +16,7 @@ export async function POST(
   const streamId = getSessionStreamId(shareId);
   const ds = getDurableStreamClient();
 
+  await ds.ensureBucket(SHARE_BUCKET);
   await ds.createStream(SHARE_BUCKET, streamId);
 
   const source = loadDashboardPublishSource(id);
