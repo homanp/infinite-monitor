@@ -19,8 +19,8 @@ export function ShareDashboardButton() {
     try {
       await flushSyncToServer({ dirtyDashboardIds: [activeDashboardId] });
       const res = await fetch(`/api/dashboards/${activeDashboardId}/share`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Share failed");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `Share failed (${res.status})`);
       await navigator.clipboard.writeText(data.shareUrl).catch(() => {});
       window.open(data.shareUrl, "_blank");
     } catch (err) {
