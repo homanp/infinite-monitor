@@ -53,6 +53,18 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Desktop app
+
+If you want to run Infinite Monitor as an installable desktop app instead of
+starting the web app from source, there is a community-maintained Electron
+distribution for macOS, Windows, and Linux:
+
+- Desktop repo: [mehdiraized/infinite-monitor-desktop](https://github.com/mehdiraized/infinite-monitor-desktop)
+- Latest releases: [Download desktop builds](https://github.com/mehdiraized/infinite-monitor-desktop/releases/latest)
+
+The desktop project tracks this repository as its upstream source and adds
+desktop-specific packaging and integrations in a separate repository.
+
 ## Architecture
 
 ```
