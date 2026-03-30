@@ -66,18 +66,26 @@ function maybeCacheResponse(target: string, payload: ProxyResponsePayload) {
   });
 }
 
-async function fetchUpstream(target: string): Promise<ProxyResponsePayload> {
-  const existing = inflightProxyRequests.get(target);
-  if (existing) {
-    return existing;
+async function fetchUpstream(
+  target: string,
+  authorization?: string | null,
+): Promise<ProxyResponsePayload> {
+  if (!authorization) {
+    const existing = inflightProxyRequests.get(target);
+    if (existing) {
+      return existing;
+    }
   }
+
+  const fetchHeaders: Record<string, string> = {
+    "User-Agent": "infinite-monitor/1.0",
+    Accept: "application/json, text/plain, */*",
+  };
+  if (authorization) fetchHeaders["Authorization"] = authorization;
 
   const request = (async () => {
     const upstream = await fetch(target, {
-      headers: {
-        "User-Agent": "infinite-monitor/1.0",
-        Accept: "application/json, text/plain, */*",
-      },
+      headers: fetchHeaders,
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -86,13 +94,13 @@ async function fetchUpstream(target: string): Promise<ProxyResponsePayload> {
     const body = new Uint8Array(await upstream.arrayBuffer());
     const payload = { body, contentType, status: upstream.status };
 
-    maybeCacheResponse(target, payload);
+    if (!authorization) maybeCacheResponse(target, payload);
     return payload;
   })().finally(() => {
     inflightProxyRequests.delete(target);
   });
 
-  inflightProxyRequests.set(target, request);
+  if (!authorization) inflightProxyRequests.set(target, request);
   return request;
 }
 
@@ -162,18 +170,22 @@ export async function GET(request: Request) {
   if (validated instanceof Response) return validated;
   const { target } = validated;
 
-  const freshCacheHit = getFreshCacheEntry(target);
-  if (freshCacheHit) {
-    return buildProxyResponse(freshCacheHit, "HIT");
+  const authorization = request.headers.get("authorization");
+
+  if (!authorization) {
+    const freshCacheHit = getFreshCacheEntry(target);
+    if (freshCacheHit) {
+      return buildProxyResponse(freshCacheHit, "HIT");
+    }
   }
 
   const blocked = await scanTarget(target);
   if (blocked) return blocked;
 
-  const staleCacheHit = getStaleCacheEntry(target);
+  const staleCacheHit = !authorization ? getStaleCacheEntry(target) : null;
 
   try {
-    const upstream = await fetchUpstream(target);
+    const upstream = await fetchUpstream(target, authorization);
     if ((upstream.status < 200 || upstream.status >= 300) && staleCacheHit) {
       return buildProxyResponse(staleCacheHit, "STALE", upstream.status);
     }
@@ -202,11 +214,13 @@ export async function POST(request: Request) {
   try {
     const reqBody = new Uint8Array(await request.arrayBuffer());
     const reqContentType = request.headers.get("content-type");
+    const authorization = request.headers.get("authorization");
 
     const headers: Record<string, string> = {
       "User-Agent": "infinite-monitor/1.0",
     };
     if (reqContentType) headers["Content-Type"] = reqContentType;
+    if (authorization) headers["Authorization"] = authorization;
 
     const upstream = await fetch(target, {
       method: "POST",
