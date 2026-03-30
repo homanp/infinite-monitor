@@ -118,10 +118,19 @@ If you cannot verify a stable public endpoint, or the API requires auth, rate-li
 
 Shared production hosts are often rate-limited by public/demo endpoints, so avoid undocumented or flaky sources unless the user explicitly asked for that exact source and you verified it.
 
-When you do need a verified external API, use the CORS proxy provided by the host app:
+When you do need a verified external API, use the CORS proxy provided by the host app.
+The proxy supports both GET and POST requests:
 \`\`\`tsx
+// GET
 const res = await fetch("/api/proxy?url=" + encodeURIComponent("https://api.example.com/data"));
 const data = await res.json();
+
+// POST (e.g. OAuth token exchange)
+const res = await fetch("/api/proxy?url=" + encodeURIComponent("https://api.example.com/token"), {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  body: "grant_type=authorization_code&code=...",
+});
 \`\`\`
 
 Use \`useEffect\` with \`setInterval\` for polling. Always handle loading and error states.
