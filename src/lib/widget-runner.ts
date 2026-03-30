@@ -52,6 +52,7 @@ interface WidgetSandbox {
 const widgetSandboxes = new Map<string, WidgetSandbox>();
 const widgetStatuses = new Map<string, WidgetStatus>();
 const buildLocks = new Map<string, Promise<void>>();
+const restoreLocks = new Map<string, Promise<WidgetStatus | null>>();
 
 const DB_PATH =
 	process.env.DATABASE_PATH || join(process.cwd(), "data", "widgets.db");
@@ -237,6 +238,28 @@ async function restoreWidgetFromCache(
 		}
 		rmSync(cached.rootDir, { recursive: true, force: true });
 		return null;
+	}
+}
+
+async function restoreCachedWidget(
+	widgetId: string,
+	previousStatus?: WidgetStatus,
+): Promise<WidgetStatus | null> {
+	const existingRestore = restoreLocks.get(widgetId);
+	if (existingRestore) return await existingRestore;
+
+	widgetStatuses.set(widgetId, {
+		status: "building",
+		port: previousStatus?.port ?? 0,
+		startedAt: Date.now(),
+	});
+
+	const promise = restoreWidgetFromCache(widgetId);
+	restoreLocks.set(widgetId, promise);
+	try {
+		return await promise;
+	} finally {
+		restoreLocks.delete(widgetId);
 	}
 }
 
@@ -721,7 +744,7 @@ async function doBuild(widgetId: string): Promise<void> {
 			/* */
 		}
 
-		runtime = createWidgetRuntime(cachedDistDir);
+		runtime = createWidgetRuntime(dirname(cachedDistDir));
 		startFileServer(runtime, cachedDistDir, port);
 		await waitForServer(`http://127.0.0.1:${port}/`);
 
@@ -782,14 +805,17 @@ export async function ensureWidget(widgetId: string): Promise<WidgetStatus> {
 		Date.now() - existing.startedAt > BUILD_TIMEOUT_MS;
 	if (existing?.status === "building" && !isStale) return existing;
 
-	const restored = await restoreWidgetFromCache(widgetId);
+	const restored = await restoreCachedWidget(widgetId, existing);
 	if (restored) return restored;
 
 	const shouldRetryError =
 		existing?.status === "error" &&
 		existing.startedAt &&
 		Date.now() - existing.startedAt > ERROR_RETRY_MS;
-	if (existing?.status === "error" && !shouldRetryError) return existing;
+	if (existing?.status === "error" && !shouldRetryError) {
+		widgetStatuses.set(widgetId, existing);
+		return existing;
+	}
 
 	const port = await getPort({ port: portNumbers(4100, 4999) });
 	const status: WidgetStatus = {
