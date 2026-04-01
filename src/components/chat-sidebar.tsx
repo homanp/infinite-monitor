@@ -47,11 +47,13 @@ import { SearchProviderPicker } from "@/components/search-provider-picker";
 import { McpConfigDialog } from "@/components/mcp-config-dialog";
 import { CustomApiDialog } from "@/components/custom-api-dialog";
 import {
-  PROVIDERS,
+  getBuiltinProviders,
   parseModelString,
   createCustomProviderInfo,
   isCustomProvider,
   CUSTOM_PROVIDER_PREFIX,
+  OPENROUTER_PROVIDER_ID,
+  OPENROUTER_STARTER_MODELS,
 } from "@/lib/model-registry";
 import { Switch } from "@/components/ui/switch";
 
@@ -108,6 +110,7 @@ function KittLoader() {
 const abortControllers = new Map<string, AbortController>();
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1500;
+const OPENROUTER_STARTER_MODEL_IDS = new Set(OPENROUTER_STARTER_MODELS.map((model) => model.id));
 
 function ReasoningBlock({
   text,
@@ -461,7 +464,7 @@ async function streamToWidget(
   }
 }
 
-function useModelSelector() {
+function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: boolean }) {
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const setModel = useSettingsStore((s) => s.setModel);
   const apiKeys = useSettingsStore((s) => s.apiKeys);
@@ -475,26 +478,42 @@ function useModelSelector() {
   const [customApiOpen, setCustomApiOpen] = useState(false);
 
   const { providerId, modelId } = parseModelString(selectedModel);
+  const hasOpenRouterByokKey = !!apiKeys[OPENROUTER_PROVIDER_ID];
 
   const allProviders = useMemo(() => {
+    const builtInProviders = getBuiltinProviders({
+      includeOpenRouterByokModels: hasOpenRouterByokKey,
+    });
     const customProviders = customApis
       .filter((c) => c.enabled)
       .map((c) => createCustomProviderInfo(c));
-    return [...PROVIDERS, ...customProviders];
-  }, [customApis]);
+    return [...builtInProviders, ...customProviders];
+  }, [customApis, hasOpenRouterByokKey]);
 
   const provider = allProviders.find((p) => p.id === providerId);
   const model = provider?.models.find((m) => m.id === modelId);
+  const isOpenRouterStarterModel = providerId === OPENROUTER_PROVIDER_ID
+    && OPENROUTER_STARTER_MODEL_IDS.has(modelId);
 
-  const hasKey = isCustomProvider(providerId)
+  const hasSavedKey = isCustomProvider(providerId)
     ? !!customApis.find((c) => `${CUSTOM_PROVIDER_PREFIX}${c.id}` === providerId)?.apiKey
     : !!apiKeys[providerId];
+  const hasStarterAccess = isOpenRouterStarterModel && hasOpenRouterStarter;
+  const hasAccess = hasSavedKey || hasStarterAccess;
+  const showOpenRouterStarterNotice = isOpenRouterStarterModel
+    && hasOpenRouterStarter
+    && !hasSavedKey
+    && !showKeyInput;
 
   const handleSelect = (newModel: string) => {
     setModel(newModel);
     setOpen(false);
-    const { providerId: pid } = parseModelString(newModel);
+    const { providerId: pid, modelId: nextModelId } = parseModelString(newModel);
+    const isStarterOpenRouterModel = pid === OPENROUTER_PROVIDER_ID
+      && OPENROUTER_STARTER_MODEL_IDS.has(nextModelId);
     if (isCustomProvider(pid)) {
+      setShowKeyInput(false);
+    } else if (isStarterOpenRouterModel && hasOpenRouterStarter && !apiKeys[pid]) {
       setShowKeyInput(false);
     } else if (!apiKeys[pid]) {
       setShowKeyInput(true);
@@ -526,7 +545,7 @@ function useModelSelector() {
             <ModelSelectorLogo provider={providerId as "anthropic"} className="size-3.5" />
           )}
           <span>{model?.name ?? modelId}</span>
-          {!hasKey && !isCustomProvider(providerId) && (
+          {!hasAccess && !isCustomProvider(providerId) && (
             <span className="size-1.5 rounded-full bg-yellow-500/70 shrink-0" />
           )}
         </ModelSelectorTrigger>
@@ -549,6 +568,11 @@ function useModelSelector() {
                       <ModelSelectorLogo provider={p.id as "anthropic"} />
                     )}
                     <ModelSelectorName>{m.name}</ModelSelectorName>
+                    {p.id === OPENROUTER_PROVIDER_ID && OPENROUTER_STARTER_MODEL_IDS.has(m.id) && (
+                      <span className="shrink-0 border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-emerald-300">
+                        Free
+                      </span>
+                    )}
                   </ModelSelectorItem>
                 ))}
               </ModelSelectorGroup>
@@ -595,30 +619,51 @@ function useModelSelector() {
     </>
   );
 
-  const keyInputEl = !isCustomProvider(providerId) && (showKeyInput || !hasKey) ? (
-    <div className="flex items-center gap-1.5">
-      <input
-        type="password"
-        value={keyInput}
-        onChange={(e) => setKeyInput(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && handleSaveKey()}
-        placeholder={`${provider?.name ?? providerId} API key...`}
-        className="flex-1 bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
-      />
-      <button
-        onClick={handleSaveKey}
-        className="px-2.5 py-1.5 text-xs uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
-      >
-        Save
-      </button>
-    </div>
-  ) : null;
+  const shouldShowKeyInput = !isCustomProvider(providerId) && (showKeyInput || !hasAccess);
+
+  const keyInputEl = !isCustomProvider(providerId)
+    ? shouldShowKeyInput
+      ? (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSaveKey()}
+            placeholder={`${provider?.name ?? providerId} API key...`}
+            className="flex-1 bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+          />
+          <button
+            onClick={handleSaveKey}
+            className="px-2.5 py-1.5 text-xs uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+          >
+            Save
+          </button>
+        </div>
+      )
+      : showOpenRouterStarterNotice
+        ? (
+          <div className="flex items-center justify-between gap-3 border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-400">
+            <span>Starter OpenRouter models work out of the box. Add your own key to unlock frontier models.</span>
+            <button
+              type="button"
+              onClick={() => setShowKeyInput(true)}
+              className="shrink-0 px-2 py-1 text-[10px] uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+            >
+              Add key
+            </button>
+          </div>
+        )
+        : null
+    : null;
 
   return { trigger, keyInputEl };
 }
 
-export function ChatSidebar() {
-  const { trigger: modelTrigger, keyInputEl: modelKeyInput } = useModelSelector();
+export function ChatSidebar({ hasOpenRouterStarter = false }: { hasOpenRouterStarter?: boolean }) {
+  const { trigger: modelTrigger, keyInputEl: modelKeyInput } = useModelSelector({
+    hasOpenRouterStarter,
+  });
   const [mcpOpen, setMcpOpen] = useState(false);
   const mcpServers = useSettingsStore((s) => s.mcpServers);
   const enabledMcpCount = mcpServers.filter((s) => s.enabled).length;
@@ -643,10 +688,10 @@ export function ChatSidebar() {
     ? streamingWidgetIds.includes(activeWidgetId)
     : false;
 
-  const handleInterrupt = () => {
+  const handleInterrupt = useCallback(() => {
     if (!activeWidgetId) return;
     abortControllers.get(activeWidgetId)?.abort();
-  };
+  }, [activeWidgetId]);
 
   useEffect(() => {
     if (!isActiveStreaming) return;
@@ -655,7 +700,7 @@ export function ChatSidebar() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [isActiveStreaming, activeWidgetId]);
+  }, [handleInterrupt, isActiveStreaming]);
 
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);

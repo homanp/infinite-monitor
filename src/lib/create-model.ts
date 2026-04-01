@@ -15,9 +15,10 @@ import { createAlibaba } from "@ai-sdk/alibaba";
 import { createDeepInfra } from "@ai-sdk/deepinfra";
 
 import type { CustomApiConfig } from "@/store/settings-store";
+import { OPENROUTER_BASE_URL, getOpenRouterHeaders } from "@/lib/openrouter";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ProviderFactory = (opts?: { apiKey?: string; baseURL?: string }) => (modelId: string) => any;
+type ProviderFactory = (opts?: { apiKey?: string; baseURL?: string; headers?: Record<string, string> }) => (modelId: string) => any;
 
 const REQUEST_TIMEOUT_MS = 800_000; // ~13 min — match maxDuration on API routes
 
@@ -26,7 +27,11 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
   return fetch(input, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 }
 
-interface ProviderOpts { apiKey?: string; baseURL?: string }
+interface ProviderOpts {
+  apiKey?: string;
+  baseURL?: string;
+  headers?: Record<string, string>;
+}
 
 function withTimeout(opts?: ProviderOpts): ProviderOpts & { fetch: typeof fetch } {
   return { ...opts, fetch: fetchWithTimeout as typeof fetch };
@@ -48,6 +53,18 @@ const providers: Record<string, ProviderFactory> = {
   moonshotai: (opts) => createMoonshotAI(withTimeout(opts)),
   alibaba: (opts) => createAlibaba(withTimeout(opts)),
   deepinfra: (opts) => createDeepInfra(withTimeout(opts)),
+  openrouter: (opts) =>
+    createOpenAI({
+      ...withTimeout({
+        ...opts,
+        baseURL: opts?.baseURL ?? OPENROUTER_BASE_URL,
+        headers: {
+          ...(getOpenRouterHeaders() ?? {}),
+          ...(opts?.headers ?? {}),
+        },
+      }),
+      name: "openrouter",
+    }).chat,
 };
 
 const CUSTOM_PROVIDER_PREFIX = "custom:";

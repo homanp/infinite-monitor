@@ -20,7 +20,34 @@ function models(
   return list.map(([id, name]) => ({ id, name, providerId, providerName }));
 }
 
+export const OPENROUTER_PROVIDER_ID = "openrouter";
+export const OPENROUTER_DEFAULT_STARTER_MODEL_ID = "qwen/qwen3.6-plus-preview:free";
+
+export const OPENROUTER_STARTER_MODELS = models(OPENROUTER_PROVIDER_ID, "OpenRouter", [
+  [OPENROUTER_DEFAULT_STARTER_MODEL_ID, "Qwen3.6 Plus Preview (free)"],
+  ["nvidia/nemotron-3-super-120b-a12b:free", "Nemotron 3 Super 120B A12B (free)"],
+  ["minimax/minimax-m2.5:free", "MiniMax M2.5 (free)"],
+  ["qwen/qwen3-coder:free", "Qwen3 Coder 480B (free)"],
+  ["z-ai/glm-4.5-air:free", "GLM 4.5 Air (free)"],
+]);
+
+export const OPENROUTER_BYOK_MODELS = models(OPENROUTER_PROVIDER_ID, "OpenRouter", [
+  ["anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6"],
+  ["anthropic/claude-opus-4.6", "Claude Opus 4.6"],
+  ["openai/gpt-5.4-mini", "GPT-5.4 Mini"],
+  ["openai/gpt-5.4", "GPT-5.4"],
+  ["google/gemini-3.1-pro-preview", "Gemini 3.1 Pro"],
+  ["moonshotai/kimi-k2.5", "Kimi K2.5"],
+  ["deepseek/deepseek-v3.2", "DeepSeek V3.2"],
+]);
+
 export const PROVIDERS: ProviderInfo[] = [
+  {
+    id: OPENROUTER_PROVIDER_ID,
+    name: "OpenRouter",
+    envKey: "OPENROUTER_API_KEY",
+    models: [...OPENROUTER_STARTER_MODELS, ...OPENROUTER_BYOK_MODELS],
+  },
   {
     id: "anthropic",
     name: "Anthropic",
@@ -189,7 +216,7 @@ export const PROVIDERS: ProviderInfo[] = [
 
 export const ALL_MODELS = PROVIDERS.flatMap((p) => p.models);
 
-export const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
+export const DEFAULT_MODEL = `${OPENROUTER_PROVIDER_ID}:${OPENROUTER_DEFAULT_STARTER_MODEL_ID}`;
 
 export const CUSTOM_PROVIDER_PREFIX = "custom:";
 
@@ -207,8 +234,26 @@ export function createCustomProviderInfo(config: import("@/store/settings-store"
   };
 }
 
-export function findProvider(providerId: string): ProviderInfo | undefined {
-  return PROVIDERS.find((p) => p.id === providerId);
+export function getBuiltinProviders(opts?: { includeOpenRouterByokModels?: boolean }): ProviderInfo[] {
+  const includeOpenRouterByokModels = opts?.includeOpenRouterByokModels ?? true;
+
+  return PROVIDERS.map((provider) => {
+    if (provider.id !== OPENROUTER_PROVIDER_ID || includeOpenRouterByokModels) {
+      return provider;
+    }
+
+    return {
+      ...provider,
+      models: OPENROUTER_STARTER_MODELS,
+    };
+  });
+}
+
+export function findProvider(
+  providerId: string,
+  opts?: { includeOpenRouterByokModels?: boolean }
+): ProviderInfo | undefined {
+  return getBuiltinProviders(opts).find((p) => p.id === providerId);
 }
 
 export function parseModelString(modelStr: string): { providerId: string; modelId: string } {

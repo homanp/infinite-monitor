@@ -1,11 +1,12 @@
-"use client";
-
 import { DashboardGrid } from "@/components/dashboard-grid";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { AddMenu } from "@/components/add-menu";
 import { DashboardPicker } from "@/components/dashboard-picker";
 import { ShareDashboardButton } from "@/components/share-dashboard-button";
 import { AppHeader } from "@/components/app-header";
+import { hasOpenRouterStarter } from "@/lib/openrouter";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   return (
@@ -18,7 +19,7 @@ export default function Home() {
         </AppHeader>
         <DashboardGrid />
       </div>
-      <ChatSidebar />
+      <ChatSidebar hasOpenRouterStarter={hasOpenRouterStarter()} />
     </div>
   );
 }

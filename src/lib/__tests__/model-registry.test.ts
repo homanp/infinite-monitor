@@ -4,6 +4,11 @@ import {
   ALL_MODELS,
   DEFAULT_MODEL,
   findProvider,
+  getBuiltinProviders,
+  OPENROUTER_BYOK_MODELS,
+  OPENROUTER_DEFAULT_STARTER_MODEL_ID,
+  OPENROUTER_PROVIDER_ID,
+  OPENROUTER_STARTER_MODELS,
   parseModelString,
 } from "@/lib/model-registry";
 
@@ -94,6 +99,49 @@ describe("PROVIDERS", () => {
     expect(modelIds.has("gpt-5.4-mini")).toBe(true);
     expect(modelIds.has("gpt-5.4-nano")).toBe(true);
   });
+
+  it("registers OpenRouter with starter and BYOK models", () => {
+    const openRouter = findProvider(OPENROUTER_PROVIDER_ID);
+    expect(openRouter).toBeDefined();
+
+    const modelIds = new Set(openRouter!.models.map((m) => m.id));
+    expect(modelIds.has("qwen/qwen3.6-plus-preview:free")).toBe(true);
+    expect(modelIds.has("nvidia/nemotron-3-super-120b-a12b:free")).toBe(true);
+    expect(modelIds.has("minimax/minimax-m2.5:free")).toBe(true);
+    expect(modelIds.has("qwen/qwen3-coder:free")).toBe(true);
+    expect(modelIds.has("z-ai/glm-4.5-air:free")).toBe(true);
+    expect(modelIds.has("anthropic/claude-sonnet-4.6")).toBe(true);
+  });
+});
+
+describe("getBuiltinProviders", () => {
+  it("limits OpenRouter to starter models without a BYOK key", () => {
+    const openRouter = getBuiltinProviders({
+      includeOpenRouterByokModels: false,
+    }).find((provider) => provider.id === OPENROUTER_PROVIDER_ID);
+
+    expect(openRouter).toBeDefined();
+    expect(openRouter!.models).toEqual(OPENROUTER_STARTER_MODELS);
+    expect(openRouter!.models.map((model) => model.id)).toEqual([
+      "qwen/qwen3.6-plus-preview:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "minimax/minimax-m2.5:free",
+      "qwen/qwen3-coder:free",
+      "z-ai/glm-4.5-air:free",
+    ]);
+  });
+
+  it("includes the expanded OpenRouter catalog with a BYOK key", () => {
+    const openRouter = getBuiltinProviders({
+      includeOpenRouterByokModels: true,
+    }).find((provider) => provider.id === OPENROUTER_PROVIDER_ID);
+
+    expect(openRouter).toBeDefined();
+    expect(openRouter!.models).toEqual([
+      ...OPENROUTER_STARTER_MODELS,
+      ...OPENROUTER_BYOK_MODELS,
+    ]);
+  });
 });
 
 describe("ALL_MODELS", () => {
@@ -117,5 +165,9 @@ describe("DEFAULT_MODEL", () => {
     expect(provider).toBeDefined();
     const model = provider!.models.find((m) => m.id === modelId);
     expect(model).toBeDefined();
+  });
+
+  it("defaults new sessions to OpenRouter starter access", () => {
+    expect(DEFAULT_MODEL).toBe(`openrouter:${OPENROUTER_DEFAULT_STARTER_MODEL_ID}`);
   });
 });

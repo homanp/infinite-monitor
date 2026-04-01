@@ -2,6 +2,8 @@ import { streamText, stepCountIs, tool } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { z } from "zod";
 import { createModel, isAnthropicModel } from "@/lib/create-model";
+import { DEFAULT_MODEL } from "@/lib/model-registry";
+import { OpenRouterAccessError, resolveOpenRouterApiKey } from "@/lib/openrouter";
 import type { CustomApiConfig } from "@/store/settings-store";
 import { Bash } from "just-bash";
 import { createBashTool } from "bash-tool";
@@ -17,7 +19,6 @@ import {
 } from "@/db/widgets";
 import { webSearch, type SearchProvider } from "@/lib/web-search";
 import { scanUrls } from "@/lib/brin";
-import { nanoid } from "nanoid";
 import { maybeCreateTraceRecorder, publishDashboardStateForWidgetIfShared } from "@/lib/share-recorder";
 import type { SharedChatMessage } from "@/lib/share-types";
 
@@ -195,8 +196,21 @@ export async function POST(request: Request) {
   const traceRecorder = await maybeCreateTraceRecorder(widgetId).catch(() => null);
   traceRecorder?.startRun();
 
-  const selectedModel = modelStr ?? "anthropic:claude-sonnet-4-6";
+  const selectedModel = modelStr ?? DEFAULT_MODEL;
   const useAnthropic = isAnthropicModel(selectedModel);
+  let resolvedApiKey: string | undefined;
+
+  try {
+    resolvedApiKey = resolveOpenRouterApiKey(selectedModel, apiKey, request, {
+      route: "chat",
+      widgetId,
+    });
+  } catch (error) {
+    if (error instanceof OpenRouterAccessError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 
   // Prepare custom API config if using a custom provider
   const customConfig: CustomApiConfig | undefined = customApi
@@ -360,7 +374,7 @@ export async function POST(request: Request) {
   }
 
   const result = streamText({
-    model: createModel(selectedModel, apiKey, customConfig),
+    model: createModel(selectedModel, resolvedApiKey, customConfig),
     system: SYSTEM_PROMPT,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     messages: messages as any,
