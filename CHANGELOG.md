@@ -8,14 +8,25 @@ Sections are ordered **newest first** (by tag date). Git tags: `v0.0.3` (2026-03
 
 ### Added
 
+- **Dashboard sharing** — stable sharing with live session updates via a durable-stream-first architecture (share button, live view, stream recorder)
 - Custom OpenAI-compatible API (base URL + key) managed from the model picker ([#46](https://github.com/homanp/infinite-monitor/pull/46))
 - **Secure Exec** widget runtime — V8-isolate sandboxes build and serve widgets without Docker (`secure-exec` 0.1.0)
+- **CORS proxy POST/OPTIONS** — widgets can make POST requests through the proxy (e.g. OAuth2 token exchange) with proper CORS preflight handling
+- **Streamed tool call actions** — tool calls shown in the UI as soon as the model begins generating them, before full content is available
+- **SSE keepalive** — 15-second heartbeat prevents Railway proxy timeout on long-running AI streams
+- **PR commit security scan** CI workflow
+- **Railway deployment** config (`railway.toml`) and prebuild template script for faster startup
 
 ### Changed
 
 - README and docs describe Secure Exec instead of Docker for widget isolation
 - CI uses **Node 22** for `secure-exec` native dependency compatibility
 - `next.config`: `secure-exec` listed in `serverExternalPackages`; `dockerode` removed
+- Composer footer: model, search, and MCP controls grouped left; attachment and submit anchored right
+- Planning indicator hidden while reasoning is streaming; shown only when no tool call is active
+- Share button and live view components refactored and simplified
+- Shared view reasoning uses native `<details>`/`<summary>` elements
+- README documents desktop app option
 
 ### Removed
 
@@ -27,6 +38,19 @@ Sections are ordered **newest first** (by tag date). Git tags: `v0.0.3` (2026-03
 - Sandbox reliability: real filesystem, shared base template, async builds, host-level fetch where appropriate
 - Widget iframe showed **Widget not found** after applying a dashboard template
 - Railway build: exclude `drizzle.config.ts` from the production typecheck graph
+- Active dashboard showed widgets from other dashboards after switching
+- Authorization header dropped by CORS proxy on authenticated requests
+- CORS headers missing from proxy error responses, blocking widgets from reading error bodies
+- Cached widget restores not serialized, causing race conditions on startup
+- Widget build cache lost across server restarts
+- Missing `SHARE_ID_SECRET` threw unhandled error instead of a graceful response
+- Auto-create durable stream bucket on first share instead of erroring
+- Production widget proxy stability: reduced repeated hits from freshly generated widgets
+- Railway npm compatibility issues
+- New widgets shifted existing canvas items instead of occupying the next free slot
+- Chat tool status disappeared too quickly; planning indicator flashed during active tool calls
+- SQLite race condition when concurrent Next.js build workers initialized the schema
+- Network errors on long-running AI streams — added `maxDuration`, fetch timeout, and client-side retry
 
 ## 0.0.3 — 2026-03-18
 
