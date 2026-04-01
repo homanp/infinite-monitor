@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getNextWidgetInsertionY, shiftItemsDown, useWidgetStore } from "@/store/widget-store";
+import {
+  getNextWidgetInsertionY,
+  resolveActiveDashboardId,
+  shiftItemsDown,
+  useWidgetStore,
+} from "@/store/widget-store";
 import type { Dashboard, TextBlock, Widget } from "@/store/widget-store";
 
 function makeWidget(id: string, x: number, y: number, w: number, h: number): Widget {
@@ -111,6 +116,24 @@ describe("getNextWidgetInsertionY", () => {
   });
 });
 
+describe("resolveActiveDashboardId", () => {
+  it("keeps the current dashboard when it still exists", () => {
+    const dashboards = [makeDashboard("dash-1"), makeDashboard("dash-2")];
+
+    expect(resolveActiveDashboardId(dashboards, "dash-2")).toBe("dash-2");
+  });
+
+  it("falls back to the first dashboard when the stored id is stale", () => {
+    const dashboards = [makeDashboard("dash-1"), makeDashboard("dash-2")];
+
+    expect(resolveActiveDashboardId(dashboards, "missing")).toBe("dash-1");
+  });
+
+  it("returns null when there are no dashboards", () => {
+    expect(resolveActiveDashboardId([], "missing")).toBeNull();
+  });
+});
+
 describe("addWidget", () => {
   it("places the first widget at the baseline row", () => {
     const widgetId = useWidgetStore.getState().addWidget("First");
@@ -162,6 +185,30 @@ describe("addWidget", () => {
     expect(after.widgets.find((widget) => widget.id === "w1")?.layout.y).toBe(7);
     expect(after.widgets.find((widget) => widget.id === "w2")?.layout.y).toBe(1);
     expect(after.textBlocks.find((block) => block.id === "t1")?.layout.y).toBe(-2);
+  });
+});
+
+describe("dashboard selection", () => {
+  it("falls back to the first dashboard when selecting a stale id", () => {
+    useWidgetStore.setState({
+      dashboards: [makeDashboard("dash-1"), makeDashboard("dash-2")],
+      activeDashboardId: "dash-1",
+    });
+
+    useWidgetStore.getState().setActiveDashboard("missing");
+
+    expect(useWidgetStore.getState().activeDashboardId).toBe("dash-1");
+  });
+
+  it("moves selection to the next available dashboard when removing the active one", () => {
+    useWidgetStore.setState({
+      dashboards: [makeDashboard("dash-1"), makeDashboard("dash-2")],
+      activeDashboardId: "dash-1",
+    });
+
+    useWidgetStore.getState().removeDashboard("dash-1");
+
+    expect(useWidgetStore.getState().activeDashboardId).toBe("dash-2");
   });
 });
 

@@ -5,7 +5,7 @@ import { ChevronDown, Plus, Pencil, Check, Trash2, LayoutDashboard } from "lucid
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { useWidgetStore } from "@/store/widget-store";
+import { resolveActiveDashboardId, useWidgetStore } from "@/store/widget-store";
 import { scheduleSyncToServer } from "@/lib/sync-db";
 
 export function DashboardPicker() {
@@ -25,7 +25,8 @@ export function DashboardPicker() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
 
-  const activeDashboard = dashboards.find((d) => d.id === activeDashboardId);
+  const resolvedActiveDashboardId = resolveActiveDashboardId(dashboards, activeDashboardId);
+  const activeDashboard = dashboards.find((d) => d.id === resolvedActiveDashboardId);
 
   useEffect(() => {
     if (!open) return;
@@ -141,7 +142,7 @@ export function DashboardPicker() {
                 onClick={() => editingId !== d.id && handleSelect(d.id)}
                 className={cn(
                   "flex items-center gap-2 px-3 py-1.5 text-xs uppercase tracking-wider cursor-pointer transition-colors",
-                  d.id === activeDashboardId
+                  d.id === resolvedActiveDashboardId
                     ? "text-zinc-100 bg-zinc-700/50"
                     : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/30"
                 )}
@@ -168,9 +169,9 @@ export function DashboardPicker() {
                     <button
                       onClick={(e) => handleStartEdit(e, d.id, d.title)}
                       className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 shrink-0"
-                      style={{ opacity: d.id === activeDashboardId ? 0.6 : 0 }}
+                      style={{ opacity: d.id === resolvedActiveDashboardId ? 0.6 : 0 }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = "1"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = d.id === activeDashboardId ? "0.6" : "0"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.opacity = d.id === resolvedActiveDashboardId ? "0.6" : "0"; }}
                     >
                       <Pencil className="h-3 w-3" />
                     </button>

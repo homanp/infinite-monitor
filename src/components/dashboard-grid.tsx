@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { LayoutGrid, TrendingUp, Shield, Globe } from "lucide-react";
-import { useWidgetStore } from "@/store/widget-store";
+import { resolveActiveDashboardId, useWidgetStore } from "@/store/widget-store";
 import { WidgetCard } from "@/components/widget-card";
 import { TextBlockItem } from "@/components/text-block-item";
 import { deleteWidgetFromDb, deleteTextBlockFromDb, scheduleSyncToServer } from "@/lib/sync-db";
@@ -185,31 +185,35 @@ export function DashboardGrid() {
     return () => observer.disconnect();
   }, []);
 
-  const activeDashboard = dashboards.find((d) => d.id === activeDashboardId);
+  const resolvedActiveDashboardId = useMemo(
+    () => resolveActiveDashboardId(dashboards, activeDashboardId),
+    [dashboards, activeDashboardId],
+  );
+  const activeDashboard = dashboards.find((d) => d.id === resolvedActiveDashboardId);
 
   const widgets = useMemo(() => {
-    if (!activeDashboard) return allWidgets;
+    if (!activeDashboard) return dashboards.length === 0 ? allWidgets : [];
     return allWidgets.filter((w) => activeDashboard.widgetIds.includes(w.id));
-  }, [allWidgets, activeDashboard]);
+  }, [allWidgets, activeDashboard, dashboards.length]);
 
   const textBlocks = useMemo(() => {
-    if (!activeDashboard) return allTextBlocks;
+    if (!activeDashboard) return dashboards.length === 0 ? allTextBlocks : [];
     return allTextBlocks.filter((tb) => (activeDashboard.textBlockIds ?? []).includes(tb.id));
-  }, [allTextBlocks, activeDashboard]);
+  }, [allTextBlocks, activeDashboard, dashboards.length]);
 
   const DEFAULT_VIEWPORT = { panX: 24, panY: 60, zoom: 1 };
 
-  const viewport = activeDashboardId
-    ? viewports[activeDashboardId] ?? DEFAULT_VIEWPORT
+  const viewport = resolvedActiveDashboardId
+    ? viewports[resolvedActiveDashboardId] ?? DEFAULT_VIEWPORT
     : DEFAULT_VIEWPORT;
 
   const handleViewportChange = useCallback(
     (panX: number, panY: number, zoom: number) => {
-      if (activeDashboardId) {
-        setViewport(activeDashboardId, { panX, panY, zoom });
+      if (resolvedActiveDashboardId) {
+        setViewport(resolvedActiveDashboardId, { panX, panY, zoom });
       }
     },
-    [activeDashboardId, setViewport]
+    [resolvedActiveDashboardId, setViewport]
   );
 
   const handleRemove = useCallback(

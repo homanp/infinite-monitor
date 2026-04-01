@@ -161,6 +161,17 @@ export function getNextWidgetInsertionY(
   return Number.isFinite(topY) ? topY - newHeight : 0;
 }
 
+export function resolveActiveDashboardId(
+  dashboards: Dashboard[],
+  activeDashboardId: string | null | undefined,
+): string | null {
+  if (dashboards.length === 0) return null;
+  if (activeDashboardId && dashboards.some((dashboard) => dashboard.id === activeDashboardId)) {
+    return activeDashboardId;
+  }
+  return dashboards[0].id;
+}
+
 export const useWidgetStore = create<WidgetStore>()(
   persist(
     (set, get) => ({
@@ -196,13 +207,17 @@ export const useWidgetStore = create<WidgetStore>()(
         const widgetIds = dashboard?.widgetIds ?? [];
         const textBlockIds = dashboard?.textBlockIds ?? [];
         set((state) => {
+          const dashboards = state.dashboards.filter((d) => d.id !== id);
           const nextActions = { ...state.currentActions };
           for (const wid of widgetIds) delete nextActions[wid];
           return {
-            dashboards: state.dashboards.filter((d) => d.id !== id),
+            dashboards,
             widgets: state.widgets.filter((w) => !widgetIds.includes(w.id)),
             textBlocks: state.textBlocks.filter((tb) => !textBlockIds.includes(tb.id)),
-            activeDashboardId: state.activeDashboardId === id ? null : state.activeDashboardId,
+            activeDashboardId: resolveActiveDashboardId(
+              dashboards,
+              state.activeDashboardId === id ? null : state.activeDashboardId,
+            ),
             activeWidgetId: widgetIds.includes(state.activeWidgetId ?? "") ? null : state.activeWidgetId,
             streamingWidgetIds: state.streamingWidgetIds.filter((wid) => !widgetIds.includes(wid)),
             reasoningStreamingIds: state.reasoningStreamingIds.filter((wid) => !widgetIds.includes(wid)),
@@ -212,7 +227,7 @@ export const useWidgetStore = create<WidgetStore>()(
       },
 
       setActiveDashboard: (id) => {
-        set({ activeDashboardId: id });
+        set({ activeDashboardId: resolveActiveDashboardId(get().dashboards, id) });
       },
 
       addWidget: (title = "Untitled Widget", description = "") => {
@@ -600,7 +615,7 @@ export const useWidgetStore = create<WidgetStore>()(
           ...current,
           ...stored,
           dashboards,
-          activeDashboardId: stored.activeDashboardId ?? dashboards[0]?.id ?? null,
+          activeDashboardId: resolveActiveDashboardId(dashboards, stored.activeDashboardId ?? null),
           streamingWidgetIds: [],
           currentActions: {},
           reasoningStreamingIds: [],
