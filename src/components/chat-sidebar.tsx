@@ -46,6 +46,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { SearchProviderPicker } from "@/components/search-provider-picker";
 import { McpConfigDialog } from "@/components/mcp-config-dialog";
 import { CustomApiDialog } from "@/components/custom-api-dialog";
+import { OrcaRouterAuthPanel } from "@/components/orcarouter-auth-panel";
 import {
   getBuiltinProviders,
   parseModelString,
@@ -54,7 +55,12 @@ import {
   CUSTOM_PROVIDER_PREFIX,
   OPENROUTER_PROVIDER_ID,
   OPENROUTER_STARTER_MODELS,
+  ORCAROUTER_PROVIDER_ID,
+  type ModelInfo,
 } from "@/lib/model-registry";
+import { ORCAROUTER_SEED_MODELS, toPublicModels, type PublicOrcaModel } from "@/lib/orcarouter/catalog";
+import { buildOrcaModelOptions, isCompatibleSelection } from "@/lib/orcarouter/selector";
+import { fetchOrcaModelsFromRoute } from "@/lib/orcarouter/client";
 import { Switch } from "@/components/ui/switch";
 
 interface PendingFile {
@@ -231,6 +237,19 @@ async function streamToWidget(
 
   setStreaming(widgetId, true);
 
+  const orcaGeneration = useSettingsStore.getState().orcarouterAuth.generation;
+  const isOrcaModel = typeof model === "string" && model.startsWith("orcarouter:");
+
+  /**
+   * A relay 401 means the durable key was revoked: mark the exact credential
+   * generation as needing reauthentication instead of retrying or refreshing.
+   */
+  function maybeMarkOrcaReauth(message: string) {
+    if (!isOrcaModel) return;
+    if (!/401|unauthori[sz]ed|invalid api key|authentication/i.test(message)) return;
+    useSettingsStore.getState().markOrcaRouterNeedsReauth(orcaGeneration);
+  }
+
   let currentMsgId = nanoid();
   addMessage(widgetId, { id: currentMsgId, role: "assistant", content: "" });
 
@@ -328,6 +347,7 @@ async function streamToWidget(
 
         if (!res.ok) {
           const err = await res.text();
+          maybeMarkOrcaReauth(err);
           updateAssistantMessage(widgetId, currentMsgId, `Error: ${err}`);
           return;
         }
@@ -416,6 +436,7 @@ async function streamToWidget(
                   fullText || "[Interrupted]"
                 );
               } else if (event.type === "error") {
+                maybeMarkOrcaReauth(String(event.error));
                 updateAssistantMessage(
                   widgetId,
                   currentMsgId,
@@ -464,7 +485,91 @@ async function streamToWidget(
   }
 }
 
-function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: boolean }) {
+const ORCA_LOGO_URL = "https://www.orcarouter.ai/orca-logo-classic.png";
+const ORCAROUTER_SEED_CATALOG: PublicOrcaModel[] = toPublicModels(ORCAROUTER_SEED_MODELS);
+
+function OrcaLogo({ className }: { className?: string }) {
+  return (
+    <img
+      src={ORCA_LOGO_URL}
+      alt="OrcaRouter"
+      width={14}
+      height={14}
+      className={cn("shrink-0 object-contain", className)}
+    />
+  );
+}
+
+type OrcaCatalogStatus = "unconfigured" | "loading" | "live" | "degraded";
+
+interface OrcaCatalogState {
+  models: PublicOrcaModel[];
+  status: OrcaCatalogStatus;
+}
+
+/**
+ * Live OrcaRouter catalog. Discovery goes through the server route so the key
+ * is never part of a URL; when it fails, the small verified seed remains and
+ * the UI says so instead of pretending it is the live catalog.
+ */
+function useOrcaRouterCatalog(apiKey: string | undefined): OrcaCatalogState {
+  // Only the *result* of discovery is state; everything about "no key yet" or
+  // "a newer key is loading" is derived during render, so no effect writes
+  // state synchronously on mount.
+  const [remote, setRemote] = useState<{ forKey: string; models: PublicOrcaModel[]; status: "live" | "degraded" } | null>(null);
+
+  useEffect(() => {
+    if (!apiKey) return;
+    let cancelled = false;
+
+    fetchOrcaModelsFromRoute(apiKey, "chat")
+      .then((models) => {
+        if (cancelled) return;
+        setRemote(
+          models.length > 0
+            ? { forKey: apiKey, models, status: "live" }
+            : { forKey: apiKey, models: ORCAROUTER_SEED_CATALOG, status: "degraded" }
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRemote({ forKey: apiKey, models: ORCAROUTER_SEED_CATALOG, status: "degraded" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey]);
+
+  if (!apiKey) {
+    return { models: ORCAROUTER_SEED_CATALOG, status: "unconfigured" };
+  }
+  if (remote?.forKey === apiKey) {
+    return { models: remote.models, status: remote.status };
+  }
+  return { models: ORCAROUTER_SEED_CATALOG, status: "loading" };
+}
+
+function orcaCatalogLabel(status: OrcaCatalogStatus): string {
+  switch (status) {
+    case "live":
+      return "live catalog";
+    case "loading":
+      return "loading catalog…";
+    case "degraded":
+      return "verified fallback · catalog unavailable";
+    default:
+      return "add a key for the full catalog";
+  }
+}
+
+function useModelSelector({
+  hasOpenRouterStarter,
+  requiresImageInput,
+}: {
+  hasOpenRouterStarter: boolean;
+  requiresImageInput: boolean;
+}) {
   const selectedModel = useSettingsStore((s) => s.selectedModel);
   const setModel = useSettingsStore((s) => s.setModel);
   const apiKeys = useSettingsStore((s) => s.apiKeys);
@@ -472,6 +577,9 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
   const customApis = useSettingsStore((s) => s.customApis);
   const toggleCustomApi = useSettingsStore((s) => s.toggleCustomApi);
   const removeCustomApi = useSettingsStore((s) => s.removeCustomApi);
+  const orcaAuth = useSettingsStore((s) => s.orcarouterAuth);
+  const setOrcaRouterCredential = useSettingsStore((s) => s.setOrcaRouterCredential);
+  const clearOrcaRouterCredential = useSettingsStore((s) => s.clearOrcaRouterCredential);
   const [open, setOpen] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -479,16 +587,40 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
 
   const { providerId, modelId } = parseModelString(selectedModel);
   const hasOpenRouterByokKey = !!apiKeys[OPENROUTER_PROVIDER_ID];
+  const orcaKey = apiKeys[ORCAROUTER_PROVIDER_ID];
+  const orcaCatalog = useOrcaRouterCatalog(orcaKey);
+
+  const orcaOptions = useMemo<PublicOrcaModel[]>(
+    () => buildOrcaModelOptions({ catalog: orcaCatalog.models, requiresImageInput }),
+    [orcaCatalog.models, requiresImageInput]
+  );
+
+  const orcaModels = useMemo<ModelInfo[]>(
+    () => orcaOptions.map((model) => ({
+      id: model.id,
+      name: model.name,
+      providerId: ORCAROUTER_PROVIDER_ID,
+      providerName: "OrcaRouter",
+    })),
+    [orcaOptions]
+  );
+
+  // Derived, not stored: a stored selection only becomes invalid when the
+  // message attachments or the live catalog change under it. Reading it during
+  // render keeps the selector honest without an effect that rewrites state.
+  const orcaSelectionInvalid = providerId === ORCAROUTER_PROVIDER_ID
+    && modelId.length > 0
+    && !isCompatibleSelection(modelId, orcaOptions);
 
   const allProviders = useMemo(() => {
     const builtInProviders = getBuiltinProviders({
       includeOpenRouterByokModels: hasOpenRouterByokKey,
-    });
+    }).map((p) => (p.id === ORCAROUTER_PROVIDER_ID ? { ...p, models: orcaModels } : p));
     const customProviders = customApis
       .filter((c) => c.enabled)
       .map((c) => createCustomProviderInfo(c));
     return [...builtInProviders, ...customProviders];
-  }, [customApis, hasOpenRouterByokKey]);
+  }, [customApis, hasOpenRouterByokKey, orcaModels]);
 
   const provider = allProviders.find((p) => p.id === providerId);
   const model = provider?.models.find((m) => m.id === modelId);
@@ -538,13 +670,22 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
   const trigger = (
     <>
       <ModelSelector open={open} onOpenChange={setOpen}>
-        <ModelSelectorTrigger className="inline-flex h-7 items-center gap-1.5 px-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer">
+        <ModelSelectorTrigger
+          data-testid="model-selector-trigger"
+          className="inline-flex h-7 items-center gap-1.5 px-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
+        >
           {isCustomProvider(providerId) ? (
             <Server className="size-3.5 text-zinc-400" />
+          ) : providerId === ORCAROUTER_PROVIDER_ID ? (
+            <OrcaLogo className="size-3.5" />
           ) : (
             <ModelSelectorLogo provider={providerId as "anthropic"} className="size-3.5" />
           )}
-          <span>{model?.name ?? modelId}</span>
+          <span>
+            {orcaSelectionInvalid
+              ? "Select a model"
+              : model?.name ?? (modelId || "Select a model")}
+          </span>
           {!hasAccess && !isCustomProvider(providerId) && (
             <span className="size-1.5 rounded-full bg-yellow-500/70 shrink-0" />
           )}
@@ -554,16 +695,24 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
           <ModelSelectorList>
             <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
             {allProviders.map((p) => (
-              <ModelSelectorGroup key={p.id} heading={p.name}>
+              <ModelSelectorGroup
+                key={p.id}
+                heading={p.id === ORCAROUTER_PROVIDER_ID ? `${p.name} — ${orcaCatalogLabel(orcaCatalog.status)}` : p.name}
+                {...(p.id === ORCAROUTER_PROVIDER_ID ? { "data-testid": "orca-model-group" } : {})}
+              >
                 {p.models.map((m) => (
                   <ModelSelectorItem
                     key={`${p.id}:${m.id}`}
+                    data-testid="model-item"
+                    data-model-id={`${p.id}:${m.id}`}
                     value={`${p.id}:${m.id} ${m.name} ${p.name}`}
                     onSelect={() => handleSelect(`${p.id}:${m.id}`)}
                     className="flex items-center gap-2"
                   >
                     {isCustomProvider(p.id) ? (
                       <Server className="size-3 text-zinc-400" />
+                    ) : p.id === ORCAROUTER_PROVIDER_ID ? (
+                      <OrcaLogo className="size-3" />
                     ) : (
                       <ModelSelectorLogo provider={p.id as "anthropic"} />
                     )}
@@ -619,11 +768,23 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
     </>
   );
 
-  const shouldShowKeyInput = !isCustomProvider(providerId) && (showKeyInput || !hasAccess);
+  const isOrcaProvider = providerId === ORCAROUTER_PROVIDER_ID;
+  const shouldShowKeyInput = !isCustomProvider(providerId)
+    && !isOrcaProvider
+    && (showKeyInput || !hasAccess);
 
-  const keyInputEl = !isCustomProvider(providerId)
-    ? shouldShowKeyInput
-      ? (
+  const keyInputEl = isOrcaProvider
+    ? (
+      <OrcaRouterAuthPanel
+        savedKey={orcaKey}
+        auth={orcaAuth}
+        onRemoveCredential={clearOrcaRouterCredential}
+        onCredential={(credential) => setOrcaRouterCredential(credential)}
+      />
+    )
+    : !isCustomProvider(providerId)
+      ? shouldShowKeyInput
+        ? (
         <div className="flex items-center gap-1.5">
           <input
             type="password"
@@ -655,15 +816,21 @@ function useModelSelector({ hasOpenRouterStarter }: { hasOpenRouterStarter: bool
           </div>
         )
         : null
-    : null;
+      : null;
 
-  return { trigger, keyInputEl };
+  const noticeEl = orcaSelectionInvalid ? (
+    <p
+      data-testid="orca-model-notice"
+      className="border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-200"
+    >
+      That OrcaRouter model cannot take this message. Pick one that supports your attachment.
+    </p>
+  ) : null;
+
+  return { trigger, keyInputEl, noticeEl, selectionInvalid: orcaSelectionInvalid };
 }
 
 export function ChatSidebar({ hasOpenRouterStarter = false }: { hasOpenRouterStarter?: boolean }) {
-  const { trigger: modelTrigger, keyInputEl: modelKeyInput } = useModelSelector({
-    hasOpenRouterStarter,
-  });
   const [mcpOpen, setMcpOpen] = useState(false);
   const mcpServers = useSettingsStore((s) => s.mcpServers);
   const enabledMcpCount = mcpServers.filter((s) => s.enabled).length;
@@ -704,6 +871,16 @@ export function ChatSidebar({ hasOpenRouterStarter = false }: { hasOpenRouterSta
 
   const [input, setInput] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const requiresImageInput = pendingFiles.some((file) => file.file.type.startsWith("image/"));
+  const {
+    trigger: modelTrigger,
+    keyInputEl: modelKeyInput,
+    noticeEl: modelNotice,
+    selectionInvalid: modelSelectionInvalid,
+  } = useModelSelector({
+    hasOpenRouterStarter,
+    requiresImageInput,
+  });
   const inputRef = useRef(input);
   useEffect(() => { inputRef.current = input; }, [input]);
 
@@ -806,6 +983,9 @@ export function ChatSidebar({ hasOpenRouterStarter = false }: { hasOpenRouterSta
     const hasText = input.trim().length > 0;
     const hasFiles = pendingFiles.length > 0;
     if (!activeWidget || (!hasText && !hasFiles) || isActiveStreaming) return;
+    // A model cleared by a capability change — or one the live catalog no
+    // longer offers for this message — must be re-selected first.
+    if (useSettingsStore.getState().selectedModel.endsWith(":") || modelSelectionInvalid) return;
 
     const widgetId = activeWidget.id;
     const userContent = input.trim();
@@ -967,6 +1147,7 @@ export function ChatSidebar({ hasOpenRouterStarter = false }: { hasOpenRouterSta
         </Conversation>
 
         <div className="px-5 py-3 space-y-2">
+          {modelNotice}
           {modelKeyInput}
           <PromptInput onSubmit={handleSubmit}>
             {pendingFiles.length > 0 && (

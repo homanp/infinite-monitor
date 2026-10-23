@@ -9,28 +9,23 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Popover } from "@base-ui/react/popover";
 import { cn } from "@/lib/utils";
 import type { ComponentProps, ReactNode } from "react";
 
-export type ModelSelectorProps = ComponentProps<typeof Dialog>;
+export type ModelSelectorProps = ComponentProps<typeof Popover.Root>;
 
 export const ModelSelector = (props: ModelSelectorProps) => (
-  <Dialog {...props} />
+  <Popover.Root {...props} />
 );
 
-export type ModelSelectorTriggerProps = ComponentProps<typeof DialogTrigger>;
+export type ModelSelectorTriggerProps = ComponentProps<typeof Popover.Trigger>;
 
 export const ModelSelectorTrigger = (props: ModelSelectorTriggerProps) => (
-  <DialogTrigger {...props} />
+  <Popover.Trigger {...props} />
 );
 
-export type ModelSelectorContentProps = ComponentProps<typeof DialogContent> & {
+export type ModelSelectorContentProps = ComponentProps<typeof Popover.Popup> & {
   title?: ReactNode;
 };
 
@@ -40,19 +35,29 @@ export const ModelSelectorContent = ({
   title = "Model Selector",
   ...props
 }: ModelSelectorContentProps) => (
-  <DialogContent
-    aria-describedby={undefined}
-    className={cn(
-      "outline! border-none! p-0 outline-border! outline-solid!",
-      className
-    )}
-    {...props}
-  >
-    <DialogTitle className="sr-only">{title}</DialogTitle>
-    <Command className="**:data-[slot=command-input-wrapper]:h-auto">
-      {children}
-    </Command>
-  </DialogContent>
+  <Popover.Portal>
+    <Popover.Positioner
+      align="end"
+      side="top"
+      sideOffset={8}
+      collisionPadding={12}
+      className="isolate z-50 outline-none"
+    >
+      <Popover.Popup
+        data-testid="model-selector-panel"
+        aria-label={typeof title === "string" ? title : "Model Selector"}
+        className={cn(
+          "z-50 w-[min(480px,calc(100vw-2rem))] max-h-(--available-height) overflow-hidden rounded-xl border-none bg-popover p-0 text-sm text-popover-foreground shadow-xl outline-1 outline-border outline-solid",
+          className
+        )}
+        {...props}
+      >
+        <Command className="max-h-full **:data-[slot=command-input-wrapper]:h-auto">
+          {children}
+        </Command>
+      </Popover.Popup>
+    </Popover.Positioner>
+  </Popover.Portal>
 );
 
 export type ModelSelectorDialogProps = ComponentProps<typeof CommandDialog>;

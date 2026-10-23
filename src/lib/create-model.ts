@@ -16,6 +16,7 @@ import { createDeepInfra } from "@ai-sdk/deepinfra";
 
 import type { CustomApiConfig } from "@/store/settings-store";
 import { OPENROUTER_BASE_URL, getOpenRouterHeaders } from "@/lib/openrouter";
+import { resolveOrcaOrigins } from "@/lib/orcarouter/config";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ProviderFactory = (opts?: { apiKey?: string; baseURL?: string; headers?: Record<string, string> }) => (modelId: string) => any;
@@ -64,6 +65,15 @@ const providers: Record<string, ProviderFactory> = {
         },
       }),
       name: "openrouter",
+    }).chat,
+  orcarouter: (opts) =>
+    createOpenAI({
+      ...withTimeout({
+        ...opts,
+        // Inference always targets the API origin, never the auth origin.
+        baseURL: opts?.baseURL ?? resolveOrcaOrigins().apiBase,
+      }),
+      name: "orcarouter",
     }).chat,
 };
 

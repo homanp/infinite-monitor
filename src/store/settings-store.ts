@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { DEFAULT_MODEL } from "@/lib/model-registry";
 import type { SearchProvider } from "@/lib/web-search";
+import type { OrcaCredentialSource } from "@/lib/orcarouter/credentials";
 
 export type McpTransportType = "command" | "sse" | "streamableHttp";
 
@@ -34,16 +35,48 @@ export interface CustomApiConfig {
   enabled: boolean;
 }
 
+/**
+ * OrcaRouter credential metadata. The key itself lives in the store's
+ * existing `apiKeys` map (browser localStorage), exactly like every other
+ * BYOK provider; this only records how it was obtained and its lifecycle.
+ */
+export interface OrcaRouterAuthState {
+  source: OrcaCredentialSource | null;
+  scope: string | null;
+  userId: string | null;
+  generation: number;
+  needsReauth: boolean;
+  updatedAt: number | null;
+}
+
+const INITIAL_ORCAROUTER_AUTH: OrcaRouterAuthState = {
+  source: null,
+  scope: null,
+  userId: null,
+  generation: 0,
+  needsReauth: false,
+  updatedAt: null,
+};
+
 interface SettingsStore {
   selectedModel: string;
   apiKeys: Record<string, string>;
   searchProvider: SearchProvider | null;
   mcpServers: McpServerConfig[];
   customApis: CustomApiConfig[];
+  orcarouterAuth: OrcaRouterAuthState;
   setModel: (model: string) => void;
   setApiKey: (provider: string, key: string) => void;
   removeApiKey: (provider: string) => void;
   getApiKey: (provider: string) => string | undefined;
+  setOrcaRouterCredential: (credential: {
+    key: string;
+    source: OrcaCredentialSource;
+    scope?: string | null;
+    userId?: string | null;
+  }) => number;
+  clearOrcaRouterCredential: () => void;
+  markOrcaRouterNeedsReauth: (generation: number) => void;
   setSearchProvider: (provider: SearchProvider | null) => void;
   addMcpServer: (server: McpServerConfig) => void;
   updateMcpServer: (id: string, updates: Partial<Omit<McpServerConfig, "id">>) => void;
@@ -63,6 +96,7 @@ export const useSettingsStore = create<SettingsStore>()(
       searchProvider: null,
       mcpServers: [],
       customApis: [],
+      orcarouterAuth: INITIAL_ORCAROUTER_AUTH,
 
       setModel: (model) => set({ selectedModel: model }),
 
@@ -79,6 +113,44 @@ export const useSettingsStore = create<SettingsStore>()(
         }),
 
       getApiKey: (provider) => get().apiKeys[provider],
+
+      setOrcaRouterCredential: ({ key, source, scope, userId }) => {
+        const generation = get().orcarouterAuth.generation + 1;
+        set((state) => ({
+          apiKeys: { ...state.apiKeys, orcarouter: key },
+          orcarouterAuth: {
+            source,
+            scope: scope ?? null,
+            userId: userId ?? null,
+            generation,
+            needsReauth: false,
+            updatedAt: Date.now(),
+          },
+        }));
+        return generation;
+      },
+
+      clearOrcaRouterCredential: () =>
+        set((state) => {
+          const nextKeys = { ...state.apiKeys };
+          delete nextKeys.orcarouter;
+          return {
+            apiKeys: nextKeys,
+            orcarouterAuth: {
+              ...INITIAL_ORCAROUTER_AUTH,
+              generation: state.orcarouterAuth.generation + 1,
+            },
+          };
+        }),
+
+      // Generation-safe: a late 401 from an old request must never mark a
+      // freshly reauthorized credential as broken.
+      markOrcaRouterNeedsReauth: (generation) =>
+        set((state) =>
+          state.orcarouterAuth.generation === generation
+            ? { orcarouterAuth: { ...state.orcarouterAuth, needsReauth: true } }
+            : {}
+        ),
 
       setSearchProvider: (provider) => set({ searchProvider: provider }),
 

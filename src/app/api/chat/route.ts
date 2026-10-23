@@ -4,6 +4,10 @@ import { z } from "zod";
 import { createModel, isAnthropicModel } from "@/lib/create-model";
 import { DEFAULT_MODEL } from "@/lib/model-registry";
 import { OpenRouterAccessError, resolveOpenRouterApiKey } from "@/lib/openrouter";
+import {
+  OrcaRouterAccessError,
+  resolveOrcaRouterApiKey,
+} from "@/lib/orcarouter/credentials";
 import type { CustomApiConfig } from "@/store/settings-store";
 import { Bash } from "just-bash";
 import { createBashTool } from "bash-tool";
@@ -205,9 +209,17 @@ export async function POST(request: Request) {
       route: "chat",
       widgetId,
     });
+    // OrcaRouter is BYOK only: no shared starter key, no cross-provider fallback.
+    resolvedApiKey = resolveOrcaRouterApiKey(selectedModel, resolvedApiKey);
   } catch (error) {
     if (error instanceof OpenRouterAccessError) {
       return Response.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof OrcaRouterAccessError) {
+      return Response.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
     }
     throw error;
   }

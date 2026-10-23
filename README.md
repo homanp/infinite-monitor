@@ -120,6 +120,15 @@ desktop-specific packaging and integrations in a separate repository.
 
 Supports 15 AI providers including Anthropic, OpenAI, Google, xAI, Mistral, DeepSeek, Groq, and more. Enter your API key in the chat sidebar or set it via environment variables. See [`.env.example`](.env.example) for the full list.
 
+### OrcaRouter
+
+[OrcaRouter](https://www.orcarouter.ai) is an OpenAI-compatible AI gateway that routes many providers behind one endpoint. It is a first-class provider in the model menu:
+
+- **API key** — paste an `sk-orca-…` key; it is kept in the same browser store as every other BYOK provider.
+- **Connect with OrcaRouter** — OAuth 2.0 + PKCE (S256) redirect flow; the browser returns to `/orca-callback` and the app stores the durable key it receives. No client secret is involved.
+- **Inference** — `https://api.orcarouter.ai/v1`; the model list is discovered live from `GET /v1/models` with the user's own key. Vendor namespaces such as `openai/gpt-5.5` are preserved. A small verified fallback list is used only while discovery is unavailable, and the menu says so.
+- **Self-hosted** — `ORCA_AUTH_BASE_URL`, `ORCA_API_BASE_URL`, or a shared `ORCA_BASE_URL` override the public origins.
+
 ## Security
 
 **Local-first storage** — All API keys are stored in your browser's localStorage. They are sent to the server only for the duration of a request and are never persisted server-side.

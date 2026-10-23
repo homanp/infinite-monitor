@@ -23,6 +23,22 @@ function models(
 export const OPENROUTER_PROVIDER_ID = "openrouter";
 export const OPENROUTER_DEFAULT_STARTER_MODEL_ID = "qwen/qwen3.6-plus-preview:free";
 
+export const ORCAROUTER_PROVIDER_ID = "orcarouter";
+export const ORCAROUTER_DEFAULT_MODEL_ID = "orcarouter/auto";
+
+/**
+ * Cold-start list only. The chat sidebar replaces these with the live
+ * `GET /v1/models` catalog as soon as a credential is available and marks the
+ * seed as degraded when discovery is unreachable.
+ */
+export const ORCAROUTER_SEED_MODELS = models(ORCAROUTER_PROVIDER_ID, "OrcaRouter", [
+  ["openai/gpt-5.5", "GPT-5.5"],
+  ["anthropic/claude-opus-4.8", "Claude Opus 4.8"],
+  ["google/gemini-3.5-flash", "Gemini 3.5 Flash"],
+  ["deepseek/deepseek-v4-pro", "DeepSeek V4 Pro"],
+  [ORCAROUTER_DEFAULT_MODEL_ID, "OrcaRouter Auto"],
+]);
+
 export const OPENROUTER_STARTER_MODELS = models(OPENROUTER_PROVIDER_ID, "OpenRouter", [
   [OPENROUTER_DEFAULT_STARTER_MODEL_ID, "Qwen3.6 Plus Preview (free)"],
   ["nvidia/nemotron-3-super-120b-a12b:free", "Nemotron 3 Super 120B A12B (free)"],
@@ -42,6 +58,12 @@ export const OPENROUTER_BYOK_MODELS = models(OPENROUTER_PROVIDER_ID, "OpenRouter
 ]);
 
 export const PROVIDERS: ProviderInfo[] = [
+  {
+    id: ORCAROUTER_PROVIDER_ID,
+    name: "OrcaRouter",
+    envKey: "ORCAROUTER_API_KEY",
+    models: ORCAROUTER_SEED_MODELS,
+  },
   {
     id: OPENROUTER_PROVIDER_ID,
     name: "OpenRouter",

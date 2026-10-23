@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { createModel } from "@/lib/create-model";
 import { DEFAULT_MODEL } from "@/lib/model-registry";
 import { resolveOpenRouterApiKey } from "@/lib/openrouter";
+import { resolveOrcaRouterApiKey } from "@/lib/orcarouter/credentials";
 
 export async function POST(request: Request) {
   const { message, model, apiKey } = (await request.json()) as {
@@ -16,9 +17,12 @@ export async function POST(request: Request) {
 
   try {
     const selectedModel = model ?? DEFAULT_MODEL;
-    const resolvedApiKey = resolveOpenRouterApiKey(selectedModel, apiKey, request, {
-      route: "generate-title",
-    });
+    const resolvedApiKey = resolveOrcaRouterApiKey(
+      selectedModel,
+      resolveOpenRouterApiKey(selectedModel, apiKey, request, {
+        route: "generate-title",
+      })
+    );
 
     const { text } = await generateText({
       model: createModel(selectedModel, resolvedApiKey),
